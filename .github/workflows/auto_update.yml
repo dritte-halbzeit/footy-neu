@@ -1,0 +1,32 @@
+name: Weekly Player Update
+
+on:
+  schedule:
+    - cron: '0 2 * * 0' # Jeden Sonntag um 02:00 Uhr nachts
+  workflow_dispatch: # Erlaubt manuelles Starten per Klick
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: pip install cloudscraper beautifulsoup4 pandas openpyxl
+
+      - name: Run Scraper
+        run: python weekly_update.py
+
+      - name: Commit Changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add schweizer_fussball_grid.db
+          git commit -m "Automatisches Daten-Update $(date)" || echo "Keine Änderungen"
+          git push
