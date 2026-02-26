@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super League Grid</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f0f5f1; --surface: #ffffff; --surface-hover: #e8f0e9; --border: #c2d4c4;
+    --accent: #5da261; --correct: #3a8a3f; --wrong: #c0392b; --text: #1a2e1c;
+    --text-dim: #5a7a5d; --text-muted: #94b297;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+  .header { text-align: center; padding: 25px 20px 10px; }
+  .header h1 { font-family: 'Bebas Neue', sans-serif; font-size: 3rem; letter-spacing: 0.05em; }
+  .stats-bar { display: flex; justify-content: center; gap: 30px; padding: 10px; font-size: 0.9rem; }
+  .stat-value { font-weight: 700; font-family: 'Bebas Neue'; font-size: 1.2rem; }
+  .grid-wrapper { display: flex; justify-content: center; padding: 10px; }
+  .grid-container { display: grid; grid-template-columns: 100px repeat(3, 1fr); gap: 4px; max-width: 500px; width: 100%; }
+  .header-cell { background: var(--surface); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 5px; text-align: center; font-family: 'Bebas Neue'; font-size: 0.9rem; min-height: 55px; border-radius: 4px; }
+  .corner { background: transparent; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
+  .cell { background: var(--surface); border: 1px solid var(--border); min-height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 5px; border-radius: 4px; transition: 0.2s; }
+  .cell:hover { background: var(--surface-hover); }
+  .cell.filled { background: rgba(58, 138, 63, 0.1); border-color: var(--correct); cursor: default; }
+  .player-name { color: var(--correct); font-weight: 700; font-size: 0.8rem; line-height: 1.1; }
+  .player-rarity { font-size: 0.65rem; color: var(--text-dim); margin-top: 2px; }
+  .cell.wrong { background: rgba(192, 57, 43, 0.05); border-color: var(--wrong); cursor: default; }
+  
+  .search-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .search-overlay.active { display: flex; }
+  .search-box { background: white; width: 90%; max-width: 400px; border-radius: 15px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+  .search-input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; font-size: 1rem; outline: none; }
+  .search-result { padding: 12px; cursor: pointer; border-bottom: 1px solid #eee; transition: 0.1s; }
+  .search-result:hover { background: #f0f7f1; }
+  
+  .game-over-overlay { display: none; position: fixed; inset: 0; background: rgba(240, 245, 241, 0.95); z-index: 200; align-items: center; justify-content: center; }
+  .game-over-overlay.active { display: flex; }
+  .game-over-card { text-align: center; background: white; padding: 40px; border-radius: 20px; border: 1px solid var(--border); }
+  .final-score { font-family: 'Bebas Neue'; font-size: 4rem; color: var(--correct); }
+  .btn-share { background: var(--accent); color: white; border: none; padding: 12px 30px; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 15px; }
+
+  .cat-tag { font-family: 'DM Sans'; font-size: 0.6rem; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; margin-bottom: 2px; font-weight: bold; }
+  .team-tag { background: #eee; color: #666; }
+  .nation-tag { background: #e3f2fd; color: #1976d2; }
+  .goals-tag { background: #fff8e1; color: #fbc02d; }
+  .champ-tag { background: #e8f5e9; color: #2e7d32; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="header">
+    <h1>SUPER LEAGUE GRID</h1>
+    <p style="font-size: 0.8rem; color: var(--text-dim);">Das tägliche Quiz der «Dritten Halbzeit»</p>
+  </header>
+
+  <div class="stats-bar">
+    <div>Punkte: <span class="stat-value" id="score">0</span></div>
+    <div>Richtig: <span class="stat-value" id="correctCount">0/9</span></div>
+  </div>
+
+  <div class="grid-wrapper">
+    <div class="grid-container" id="grid"></div>
+  </div>
+
+  <div class="end-summary" id="endSummary" style="display:none;">
+    <button class="btn-share" onclick="location.reload()">Nochmal spielen</button>
+  </div>
+</div>
+
+<!-- Suche -->
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box">
+    <div id="searchHint" style="margin-bottom:10px; font-weight:600; color:var(--text-dim);"></div>
+    <input class="search-input" id="searchInput" type="text" placeholder="Spieler suchen..." autocomplete="off">
+    <div id="searchResults" style="max-height: 250px; overflow-y: auto;"></div>
+    <div onclick="closeSearch()" style="margin-top:10px; text-align:center; color:red; cursor:pointer; font-size:0.8rem;">Abbrechen</div>
+  </div>
+</div>
+
+<!-- Game Over -->
+<div class="game-over-overlay" id="gameOverOverlay">
+  <div class="game-over-card">
+    <h2 style="font-family:'Bebas Neue'; font-size:2rem;">SPIEL BEENDET</h2>
+    <div class="final-score" id="finalScore">0</div>
+    <p style="margin-bottom:20px;">Punkte erreicht!</p>
+    <button class="btn-share" onclick="location.reload()">OK</button>
+  </div>
+</div>
+
+<script>
+// --- KONFIGURATION ---
+const NATION_NAMES = { SUI:"Schweiz",FRA:"Frankreich",BRA:"Brasilien",GER:"Deutschland",ITA:"Italien",POR:"Portugal",ESP:"Spanien",ARG:"Argentinien",CRO:"Kroatien",SRB:"Serbien",AUT:"Österreich",ALB:"Albanien",KVX:"Kosovo" };
+
+// Logos leer lassen um Fehler zu vermeiden - Du kannst sie später einzeln hinzufügen
+const TEAM_LOGOS = {};
+
+let state = {
+  rows: [], cols: [], guessesLeft: 9, score: 0, correct: 0,
+  cells: {}, usedPlayers: new Set(), selectedCell: null, gameOver: false
+};
+
+// --- LOGIK ---
+function seedForDate(date) {
+  const s = date.getFullYear() + "-" + (date.getMonth()+1) + "-" + date.getDate();
+  let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function createRng(seed) {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+let rng = createRng(seedForDate(new Date()));
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function generateGrid() {
+  const teams = ["Basel","Young Boys","Zürich","Grasshopper","Luzern","Sion","St. Gallen","Servette","Thun","Lugano","Aarau","Winterthur","Vaduz","Xamax","Lausanne-Sport"];
+  const nations = ["SUI","FRA","BRA","GER","ITA","POR","ESP"];
+  
+  const shuffledTeams = shuffle(teams);
+  const rows = shuffledTeams.slice(0, 3).map(t => ({ type: 'team', value: t, label: t, tag: 'Verein', tagClass: 'team-tag' }));
+  
+  const colPool = [
+    ...shuffledTeams.slice(3, 5).map(t => ({ type: 'team', value: t, label: t, tag: 'Verein', tagClass: 'team-tag' })),
+    ...shuffle(nations).slice(0, 2).map(n => ({ type: 'nation', value: n, label: NATION_NAMES[n] || n, tag: 'Nation', tagClass: 'nation-tag' })),
+    { type: 'goals', value: 50, label: '> 50 Tore', tag: 'Tore', tagClass: 'goals-tag' },
+    { type: 'champion', label: 'Meister', tag: 'Titel', tagClass: 'champ-tag' }
+  ];
+  
+  const cols = shuffle(colPool).slice(0, 3);
+  return { rows, cols };
+}
+
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '<div class="corner">⚽</div>';
+
+  state.cols.forEach(cat => {
+    const el = document.createElement('div');
+    el.className = 'header-cell';
+    el.innerHTML = `<span class="cat-tag ${cat.tagClass}">${cat.tag}</span>${cat.label}`;
+    grid.appendChild(el);
+  });
+
+  for (let r = 0; r < 3; r++) {
+    const rowCat = state.rows[r];
+    const rowH = document.createElement('div');
+    rowH.className = 'header-cell';
+    rowH.innerHTML = `<span class="cat-tag ${rowCat.tagClass}">${rowCat.tag}</span>${rowCat.label}`;
+    grid.appendChild(rowH);
+
+    for (let c = 0; c < 3; c++) {
+      const key = `${r}-${c}`;
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const data = state.cells[key];
+      
+      if (data && data.player) {
+        cell.classList.add('filled');
+        cell.innerHTML = `<div><div class="player-name">${data.player}</div><div class="player-rarity">${data.rarity} Pkt.</div></div>`;
+      } else if (data === false) {
+        cell.classList.add('wrong');
+        cell.innerHTML = '✕';
+      } else {
+        cell.onclick = () => { if(!state.gameOver) openSearch(key); };
+      }
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function openSearch(key) {
+  state.selectedCell = key;
+  const [r, c] = key.split('-').map(Number);
+  document.getElementById('searchHint').textContent = `${state.rows[r].label} + ${state.cols[c].label}`;
+  document.getElementById('searchOverlay').classList.add('active');
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+  setTimeout(() => document.getElementById('searchInput').focus(), 100);
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').classList.remove('active');
+}
+
+async function renderSearchResults(query) {
+  const results = document.getElementById('searchResults');
+  if (query.trim().length < 2) { results.innerHTML = ''; return; }
+  
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const matches = await res.json();
+    results.innerHTML = matches.map(p => `<div class="search-result" onclick="makeGuess('${p.n}')">${p.n}</div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function makeGuess(playerName) {
+  if (state.usedPlayers.has(playerName)) { alert("Schon benutzt!"); return; }
+  const key = state.selectedCell;
+  const [r, c] = key.split('-').map(Number);
+  closeSearch();
+
+  try {
+    const res = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerName, rowCat: state.rows[r], colCat: state.cols[c], cellId: key })
+    });
+    const result = await res.json();
+
+    if (result.correct) {
+      state.cells[key] = { player: playerName, rarity: result.rarity };
+      state.score = Math.round((state.score + parseFloat(result.rarity)) * 10) / 10;
+      state.correct++;
+      state.usedPlayers.add(playerName);
+    } else {
+      state.cells[key] = false;
+    }
+    state.guessesLeft--;
+    document.getElementById('score').textContent = state.score;
+    document.getElementById('correctCount').textContent = `${state.correct}/9`;
+    document.getElementById('guessesLeft').textContent = state.guessesLeft;
+    renderGrid();
+    if (state.guessesLeft === 0 || state.correct === 9) {
+        state.gameOver = true;
+        document.getElementById('finalScore').textContent = state.score;
+        document.getElementById('gameOverOverlay').classList.add('active');
+    }
+  } catch(e) { console.error(e); }
+}
+
+document.getElementById('searchInput').addEventListener('input', (e) => renderSearchResults(e.target.value));
+
+const gridData = generateGrid();
+state.rows = gridData.rows;
+state.cols = gridData.cols;
+renderGrid();
+</script>
+</body>
+</html>
