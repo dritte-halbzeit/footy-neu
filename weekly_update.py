@@ -102,4 +102,73 @@ def run_update():
     # Spalten sicherstellen
     try: cursor.execute("ALTER TABLE players ADD COLUMN in_switzerland INTEGER DEFAULT 0")
     except: pass
-    try: cursor.execute("ALTER TABLE pl
+    try: cursor.execute("ALTER TABLE players ADD COLUMN last_updated TEXT")
+    except: pass
+
+    # 1. Reset CH-Status
+    cursor.execute("UPDATE players SET in_switzerland = 0")
+
+    # 2. Discovery: Alle IDs auf den Transferlisten finden
+    current_ids = get_current_league_ids()
+    print(f"✅ Insgesamt {len(current_ids)} IDs auf den Listen gefunden.")
+
+    cursor.execute("SELECT tm_id FROM players")
+    known_ids = {row[0] for row in cursor.fetchall()}
+
+    new_player_ids = list(current_ids - known_ids)
+    existing_player_ids = current_ids & known_ids
+
+    print(f"📊 Analyse: {len(existing_player_ids)} bekannte Spieler, {len(new_player_ids)} Neuzugänge.")
+
+    # 3. Bekannte Spieler markieren
+    for tid in existing_player_ids:
+        cursor.execute("UPDATE players SET in_switzerland = 1 WHERE tm_id = ?", (tid,))
+    conn.commit()
+
+    # 4. NEUE SPIELER ERFASSEN (Limit auf 40, um Neuzugänge wie Essende aufzuholen)
+    new_added = 0
+    for tid in new_player_ids[:40]:
+        print(f"🆕 Erfasse Neuzugang (ID: {tid})...")
+        d = get_complete_player_data(tid)
+        if d:
+            cursor.execute("""
+                INSERT INTO players (tm_id, name, total_tore, total_assists, total_einsaetze, 
+                                    meistertitel, is_topscorer, is_cupwinner, retired, in_switzerland, last_updated) 
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (tid, d['name'], d['t'], d['a'], d['e'], d['ch'], d['ts'], d['cup'], d['retired'], 1, datetime.date.today().isoformat()))
+            
+            for n in d['nations']:
+                cursor.execute("INSERT OR IGNORE INTO player_nations VALUES (?,?)", (tid, n))
+            for c in d['clubs']:
+                cursor.execute("INSERT OR IGNORE INTO player_clubs VALUES (?,?)", (tid, c))
+            new_added += 1
+            conn.commit()
+            print(f"      ✅ {d['name']} erfolgreich hinzugefügt.")
+        time.sleep(random.uniform(6, 10))
+
+    # 5. BESTEHENDE CH-SPIELER AKTUALISIEREN (Limit 150)
+    cursor.execute("""
+        SELECT tm_id, name FROM players 
+        WHERE in_switzerland = 1 AND retired = 0 
+        ORDER BY last_updated ASC LIMIT 150
+    """)
+    to_update = cursor.fetchall()
+    
+    print(f"🔄 Aktualisiere {len(to_update)} aktive CH-Spieler...")
+    for tid, name in to_update:
+        d = get_complete_player_data(tid)
+        if d:
+            cursor.execute("""
+                UPDATE players 
+                SET total_tore=?, total_assists=?, total_einsaetze=?, meistertitel=?, is_topscorer=?, is_cupwinner=?, retired=?, last_updated=?
+                WHERE tm_id=?
+            """, (d['t'], d['a'], d['e'], d['ch'], d['ts'], d['cup'], d['retired'], datetime.date.today().isoformat(), tid))
+            conn.commit()
+            print(f"      ✅ {name} aktualisiert.")
+        time.sleep(random.uniform(5, 8))
+
+    conn.close()
+    print(f"🏁 Update beendet. {new_added} neue Spieler hinzugefügt.")
+
+if __name__ == "__main__":
+    run_update()
