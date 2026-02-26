@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super League Grid</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f0f5f1;
+    --surface: #ffffff;
+    --surface-hover: #e8f0e9;
+    --border: #c2d4c4;
+    --accent: #5da261;
+    --accent-glow: rgba(93, 162, 97, 0.25);
+    --correct: #3a8a3f;
+    --wrong: #c0392b;
+    --text: #1a2e1c;
+    --text-dim: #5a7a5d;
+    --text-muted: #94b297;
+    --gold: #c8a415;
+    --blue: #2e7bbf;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at 20% 0%, rgba(93, 162, 97, 0.1) 0%, transparent 60%), radial-gradient(ellipse at 80% 100%, rgba(93, 162, 97, 0.06) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; }
+  .header { text-align: center; padding: 28px 20px 12px; }
+  .header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    letter-spacing: 0.06em;
+    line-height: 1;
+    background: linear-gradient(135deg, #1a2e1c 0%, #3a6b3e 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header .subtitle { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; letter-spacing: 0.12em; text-transform: uppercase; }
+
+  .stats-bar { display: flex; justify-content: center; gap: 28px; padding: 12px 20px; font-size: 0.82rem; color: var(--text-dim); }
+  .stat { display: flex; align-items: center; gap: 6px; }
+  .stat-value { font-weight: 700; color: var(--text); font-size: 1rem; font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.04em; }
+  .stat-value.score { color: var(--correct); }
+  .stat-value.guesses { color: var(--accent); }
+
+  .grid-wrapper { display: flex; justify-content: center; padding: 8px 12px 20px; }
+  .grid-container { display: grid; grid-template-columns: 110px repeat(3, 1fr); grid-template-rows: auto repeat(3, 1fr); gap: 3px; max-width: 560px; width: 100%; }
+
+  .corner { background: transparent; display: flex; align-items: center; justify-content: center; }
+  .corner img { width: 40px; height: auto; }
+
+  .header-cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 6px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(0.78rem, 2.2vw, 0.95rem);
+    letter-spacing: 0.05em;
+    text-align: center;
+    color: var(--text);
+    line-height: 1.15;
+    min-height: 48px;
+    gap: 3px;
+  }
+  .team-logo { width: 28px; height: auto; object-fit: contain; }
+  .header-label { font-size: clamp(0.68rem, 1.8vw, 0.82rem); line-height: 1.15; }
+  .header-cell.col-header { border-radius: 8px 8px 0 0; }
+  .header-cell.row-header { border-radius: 8px 0 0 8px; min-height: 80px; }
+  .header-cell .cat-tag { font-family: 'DM Sans', sans-serif; font-size: 0.55rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; line-height: 1; }
+  .cat-tag.team-tag { background: rgba(93, 162, 97, 0.1); color: var(--text-dim); }
+  .cat-tag.nation-tag { background: rgba(46, 123, 191, 0.1); color: var(--blue); }
+  .cat-tag.goals-tag { background: rgba(200, 164, 21, 0.12); color: var(--gold); }
+  .cat-tag.champ-tag { background: rgba(58, 138, 63, 0.1); color: var(--correct); }
+  .cat-tag.scorer-tag { background: rgba(192, 57, 43, 0.1); color: var(--wrong); }
+  .cat-tag.league-tag { background: rgba(52, 152, 219, 0.12); color: #2980b9; }
+
+  .cell { background: var(--surface); border: 1px solid var(--border); min-height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden; padding: 6px; text-align: center; }
+  .cell:hover:not(.filled):not(.wrong) { background: var(--surface-hover); border-color: rgba(93, 162, 97, 0.6); box-shadow: inset 0 0 20px rgba(93, 162, 97, 0.08); }
+  .cell.selected { border-color: var(--accent) !important; box-shadow: 0 0 16px var(--accent-glow), inset 0 0 20px rgba(93, 162, 97, 0.06); z-index: 2; }
+  .cell.filled { background: rgba(93, 162, 97, 0.08); border-color: rgba(58, 138, 63, 0.4); cursor: default; }
+  .cell.filled .player-name { font-weight: 600; font-size: 0.76rem; color: var(--correct); line-height: 1.25; }
+  .cell.filled .player-rarity { font-size: 0.62rem; color: var(--text-dim); margin-top: 2px; }
+  .cell.wrong { background: rgba(192, 57, 43, 0.06); border-color: rgba(192, 57, 43, 0.35); cursor: default; }
+  .cell.wrong::after { content: '✕'; font-size: 1.6rem; color: rgba(192, 57, 43, 0.45); font-weight: 300; }
+
+  .search-overlay { display: none; position: fixed; inset: 0; background: rgba(240, 245, 241, 0.9); backdrop-filter: blur(8px); z-index: 100; align-items: flex-start; justify-content: center; padding-top: min(18vh, 130px); }
+  .search-overlay.active { display: flex; }
+  .search-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 92%; max-width: 400px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,0.12); animation: slideUp 0.25s ease; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  .search-hint { padding: 10px 16px; font-size: 0.78rem; color: var(--text-muted); border-bottom: 1px solid var(--border); text-align: center; font-weight: 500; }
+  .search-input-wrap { display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--border); }
+  .search-input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 1rem; padding: 14px 12px; }
+  .search-results { max-height: 260px; overflow-y: auto; }
+  .search-result { padding: 11px 16px; cursor: pointer; transition: background 0.15s; border-bottom: 1px solid rgba(194, 212, 196, 0.5); font-weight: 500; font-size: 0.9rem; color: var(--text); }
+  .search-result:hover { background: var(--surface-hover); }
+  .search-close { padding: 12px; text-align: center; color: var(--text-dim); font-size: 0.8rem; cursor: pointer; }
+
+  .game-over-overlay { display: none; position: fixed; inset: 0; background: rgba(240, 245, 241, 0.92); backdrop-filter: blur(12px); z-index: 200; align-items: center; justify-content: center; }
+  .game-over-overlay.active { display: flex; }
+  .game-over-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 36px 32px; text-align: center; max-width: 380px; width: 90%; }
+  .final-score { font-family: 'Bebas Neue', sans-serif; font-size: 3.5rem; color: var(--correct); margin: 12px 0; }
+  .btn-share { background: var(--accent); color: #fff; border: none; padding: 11px 28px; border-radius: 10px; font-weight: 600; cursor: pointer; margin-top: 20px; transition: 0.2s; }
+  .btn-share:hover { background: #4a8a4e; transform: translateY(-2px); }
+
+  .end-summary { text-align: center; padding: 20px; }
+
+  @media (max-width: 480px) {
+    .grid-container { grid-template-columns: 80px repeat(3, 1fr); }
+    .cell { min-height: 70px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <h1>SUPER LEAGUE GRID</h1>
+    <div class="subtitle">Das tägliche Fussball-Quiz</div>
+  </header>
+
+  <div class="stats-bar">
+    <div class="stat"><span>Punkte</span><span class="stat-value score" id="score">0</span></div>
+    <div class="stat"><span>Versuche</span><span class="stat-value guesses" id="guessesLeft">9</span></div>
+    <div class="stat"><span>Richtig</span><span class="stat-value" id="correctCount">0/9</span></div>
+  </div>
+
+  <div class="grid-wrapper">
+    <div class="grid-container" id="grid"></div>
+  </div>
+
+  <div class="end-summary" id="endSummary" style="display:none;">
+    <div id="endStats" style="margin-bottom:15px; font-size:1.1rem; font-weight:600; color:var(--text);"></div>
+    <button class="btn-share" id="btnShare">Ergebnis teilen</button>
+  </div>
+
+  <div class="how-to-play" style="text-align:center; padding: 20px; font-size: 0.8rem; color: var(--text-muted);">
+    Wähle ein Feld und finde einen Spieler, der beide Kriterien erfüllt.
+  </div>
+</div>
+
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box">
+    <div class="search-hint" id="searchHint"></div>
+    <div class="search-input-wrap">
+      <input class="search-input" id="searchInput" type="text" placeholder="Spieler suchen..." autocomplete="off">
+    </div>
+    <div class="search-results" id="searchResults"></div>
+    <div class="search-close" id="searchClose">Abbrechen</div>
+  </div>
+</div>
+
+<div class="game-over-overlay" id="gameOverOverlay">
+  <div class="game-over-card">
+    <h2 style="font-family:'Bebas Neue'; font-size:2.5rem;">SPIEL BEENDET</h2>
+    <div class="final-score" id="finalScore">0 <span>Punkte</span></div>
+    <p id="gameOverMsg"></p>
+    <button class="btn-share" id="btnCloseOverlay">Schliessen</button>
+  </div>
+</div>
+
+<script>
+// --- KONSTANTEN ---
+const CORNER_HTML = '<img src="data:image/png;base64,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" alt="ball">';
+
+const NATION_NAMES = {
+  SUI:"Schweiz",FRA:"Frankreich",BRA:"Brasilien",GER:"Deutschland",ITA:"Italien",
+  KVX:"Kosovo",POR:"Portugal",CIV:"Elfenbeinküste",SRB:"Serbien",AUT:"Österreich",
+  ARG:"Argentinien",CMR:"Kamerun",BIH:"Bosnien-Herz.",CRO:"Kroatien",SEN:"Senegal",
+  NGA:"Nigeria",ALB:"Albanien",ESP:"Spanien",SWE:"Schweden",TUN:"Tunesien",
+  GHA:"Ghana",COD:"DR Kongo",LIE:"Liechtenstein",NED:"Niederlande",MAR:"Marokko",
+  JPN:"Japan",TUR:"Türkei",BEL:"Belgien",COL:"Kolumbien",ISR:"Israel",
+  ISL:"Island",GRE:"Griechenland",URU:"Uruguay",HUN:"Ungarn",CRC:"Costa Rica",
+  VEN:"Venezuela",USA:"USA",ROU:"Rumänien",MKD:"Nordmazedonien",NOR:"Norwegen"
+};
+
+const TEAM_LOGOS = {
+  "Basel": "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®" alt="Young Boys" />',
+};
+
+let state = {
+  rows: [], cols: [],
+  guessesLeft: 9, score: 0, correct: 0,
+  cells: {}, usedPlayers: new Set(),
+  selectedCell: null, gameOver: false
+};
+
+// --- HILFSFUNKTIONEN ---
+function formatHint(cat) {
+  if (cat.type === "nation") return `🌍 ${NATION_NAMES[cat.value] || cat.value}`;
+  if (cat.type === "goals") return `⚽ ${cat.label}`;
+  if (cat.type === "champion") return `🏆 ${cat.label}`;
+  if (cat.type === "topscorer") return `👑 ${cat.label}`;
+  return cat.label;
+}
+
+function headerHTML(cat) {
+  if (cat.type === 'team') {
+    const logo = TEAM_LOGOS[cat.value];
+    if (logo) return `<img class="team-logo" src="data:image/png;base64,${logo}" alt="${cat.label}"><span class="header-label">${cat.label}</span>`;
+  }
+  return `<span class="cat-tag ${cat.tagClass || ''}">${cat.tag || ''}</span>${cat.label}`;
+}
+
+// Seeded Random für tägliches Grid
+function seedForDate(date) {
+  const dateStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  let h = 0;
+  for (let i = 0; i < dateStr.length; i++) h = ((h << 5) - h + dateStr.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function createRng(seed) {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+let rng = createRng(seedForDate(new Date()));
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function generateGrid() {
+  const teams = ["Basel","Young Boys","Zürich","Grasshopper","Luzern","Sion","St. Gallen","Servette","Thun","Lugano","Aarau","Winterthur","Vaduz","Xamax","Lausanne-Sport"];
+  const nations = ["SUI","FRA","BRA","GER","ITA","POR","ESP","ARG","CRO","SRB","AUT","ALB","KVX"];
+  
+  const shuffledTeams = shuffle(teams);
+  const rows = shuffledTeams.slice(0, 3).map(t => ({ type: 'team', value: t, label: t, tag: 'Verein', tagClass: 'team-tag' }));
+  
+  const colPool = [
+    ...shuffledTeams.slice(3, 6).map(t => ({ type: 'team', value: t, label: t, tag: 'Verein', tagClass: 'team-tag' })),
+    ...shuffle(nations).slice(0, 3).map(n => ({ type: 'nation', value: n, label: NATION_NAMES[n] || n, tag: 'Nation', tagClass: 'nation-tag' })),
+    { type: 'goals', value: 50, label: '> 50 Tore', tag: 'Tore', tagClass: 'goals-tag' },
+    { type: 'champion', label: 'Meister', tag: 'Titel', tagClass: 'champ-tag' }
+  ];
+  
+  const cols = shuffle(colPool).slice(0, 3);
+  return { rows, cols };
+}
+
+// --- UI FUNKTIONEN ---
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  if (!grid) return;
+  grid.innerHTML = `<div class="corner">${CORNER_HTML}</div>`;
+
+  state.cols.forEach(cat => {
+    const el = document.createElement('div');
+    el.className = 'header-cell col-header';
+    el.innerHTML = headerHTML(cat);
+    grid.appendChild(el);
+  });
+
+  for (let r = 0; r < 3; r++) {
+    const rowH = document.createElement('div');
+    rowH.className = 'header-cell row-header';
+    rowH.innerHTML = headerHTML(state.rows[r]);
+    grid.appendChild(rowH);
+
+    for (let c = 0; c < 3; c++) {
+      const key = `${r}-${c}`;
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.key = key;
+
+      const data = state.cells[key];
+      if (data && data.player) {
+        cell.classList.add('filled');
+        cell.innerHTML = `<div><div class="player-name">${data.player}</div><div class="player-rarity">${data.rarity} Pkt.</div></div>`;
+      } else if (data === false) {
+        cell.classList.add('wrong');
+      } else {
+        cell.addEventListener('click', () => {
+          if (!state.gameOver) {
+            state.selectedCell = key;
+            document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected'));
+            cell.classList.add('selected');
+            openSearch(key);
+          }
+        });
+      }
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function openSearch(key) {
+  const [r, c] = key.split('-').map(Number);
+  document.getElementById('searchHint').textContent = `${formatHint(state.rows[r])} ∩ ${formatHint(state.cols[c])}`;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchOverlay').classList.add('active');
+  setTimeout(() => document.getElementById('searchInput').focus(), 100);
+  document.getElementById('searchResults').innerHTML = '';
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').classList.remove('active');
+  document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected'));
+  state.selectedCell = null;
+}
+
+async function renderSearchResults(query) {
+  const results = document.getElementById('searchResults');
+  const q = query.trim();
+  if (q.length < 2) return;
+
+  try {
+    const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const matches = await response.json();
+
+    if (matches.length === 0) {
+      results.innerHTML = `<div class="search-no-results">Kein Spieler gefunden</div>`;
+      return;
+    }
+
+    results.innerHTML = matches.map(p => `<div class="search-result" data-name="${p.n}">${p.n}</div>`).join('');
+    results.querySelectorAll('.search-result').forEach(el => {
+      el.addEventListener('click', () => makeGuess(el.dataset.name, state.selectedCell));
+    });
+  } catch (e) {
+    console.error("Suche fehlgeschlagen", e);
+  }
+}
+
+async function makeGuess(playerName, key) {
+  if (state.usedPlayers.has(playerName)) {
+    alert("Diesen Spieler hast du heute bereits verwendet!");
+    return;
+  }
+  const [r, c] = key.split('-').map(Number);
+  const rowCat = state.rows[r];
+  const colCat = state.cols[c];
+  closeSearch();
+
+  try {
+    const response = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerName, rowCat, colCat, cellId: key })
+    });
+    
+    const result = await response.json();
+
+    if (result.correct) {
+      state.cells[key] = { player: playerName, rarity: result.rarity };
+      state.score = Math.round((state.score + parseFloat(result.rarity)) * 10) / 10;
+      state.correct++;
+      state.usedPlayers.add(playerName);
+    } else {
+      state.cells[key] = false;
+    }
+
+    state.guessesLeft--;
+    updateStats();
+    renderGrid();
+    saveState();
+    if (state.guessesLeft === 0 || state.correct === 9) endGame();
+  } catch (e) {
+    console.error("Validierung fehlgeschlagen", e);
+  }
+}
+
+function updateStats() {
+  document.getElementById('score').textContent = state.score;
+  document.getElementById('guessesLeft').textContent = state.guessesLeft;
+  document.getElementById('correctCount').textContent = `${state.correct}/9`;
+}
+
+function saveState() {
+  const s = {...state, usedPlayers: [...state.usedPlayers]};
+  localStorage.setItem('slg_state_' + new Date().toDateString(), JSON.stringify(s));
+}
+
+function initGame() {
+  const { rows, cols } = generateGrid();
+  state.rows = rows;
+  state.cols = cols;
+  
+  const saved = localStorage.getItem('slg_state_' + new Date().toDateString());
+  if (saved) {
+    const s = JSON.parse(saved);
+    state = s;
+    state.usedPlayers = new Set(s.usedPlayers);
+  } else {
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < 3; c++)
+        state.cells[`${r}-${c}`] = null;
+  }
+  
+  renderGrid();
+  updateStats();
+  if (state.gameOver) endGameUI();
+}
+
+function endGame() {
+  state.gameOver = true;
+  saveState();
+  endGameUI();
+}
+
+function endGameUI() {
+  document.getElementById('endSummary').style.display = 'block';
+  document.getElementById('finalScore').innerHTML = `${state.score} <span>Punkte</span>`;
+  document.getElementById('endStats').textContent = `${state.correct} von 9 richtig gelöst.`;
+  document.getElementById('gameOverOverlay').classList.add('active');
+}
+
+// Events
+document.getElementById('searchInput').addEventListener('input', e => renderSearchResults(e.target.value));
+document.getElementById('searchClose').addEventListener('click', closeSearch);
+document.getElementById('btnCloseOverlay').addEventListener('click', () => document.getElementById('gameOverOverlay').classList.remove('active'));
+
+// Start
+initGame();
+</script>
+</body>
+</html>
