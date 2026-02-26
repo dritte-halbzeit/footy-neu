@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super League Grid</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f0f5f1;
+    --surface: #ffffff;
+    --surface-hover: #e8f0e9;
+    --border: #c2d4c4;
+    --accent: #5da261;
+    --accent-glow: rgba(93, 162, 97, 0.25);
+    --correct: #3a8a3f;
+    --wrong: #c0392b;
+    --text: #1a2e1c;
+    --text-dim: #5a7a5d;
+    --text-muted: #94b297;
+    --gold: #c8a415;
+    --blue: #2e7bbf;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 20% 0%, rgba(93, 162, 97, 0.1) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 100%, rgba(93, 162, 97, 0.06) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .app { position: relative; z-index: 1; }
+  .header { text-align: center; padding: 28px 20px 12px; }
+  .header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    letter-spacing: 0.06em;
+    line-height: 1;
+    background: linear-gradient(135deg, #1a2e1c 0%, #3a6b3e 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header .subtitle { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; letter-spacing: 0.12em; text-transform: uppercase; }
+
+  .stats-bar { display: flex; justify-content: center; gap: 28px; padding: 12px 20px; font-size: 0.82rem; color: var(--text-dim); }
+  .stat { display: flex; align-items: center; gap: 6px; }
+  .stat-value { font-weight: 700; color: var(--text); font-size: 1rem; font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.04em; }
+  .stat-value.score { color: var(--correct); }
+  .stat-value.guesses { color: var(--accent); }
+
+  .grid-wrapper { display: flex; justify-content: center; padding: 8px 12px 20px; }
+  .grid-container { display: grid; grid-template-columns: 110px repeat(3, 1fr); grid-template-rows: auto repeat(3, 1fr); gap: 3px; max-width: 560px; width: 100%; }
+
+  .corner { background: transparent; display: flex; align-items: center; justify-content: center; }
+  .corner img { width: 40px; height: auto; }
+
+  .header-cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 6px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(0.78rem, 2.2vw, 0.95rem);
+    letter-spacing: 0.05em;
+    text-align: center;
+    color: var(--text);
+    line-height: 1.15;
+    min-height: 48px;
+    gap: 3px;
+  }
+  .team-logo { width: 28px; height: auto; object-fit: contain; }
+  .header-label { font-size: clamp(0.68rem, 1.8vw, 0.82rem); line-height: 1.15; }
+  .header-cell.col-header { border-radius: 8px 8px 0 0; }
+  .header-cell.row-header { border-radius: 8px 0 0 8px; min-height: 80px; }
+  .header-cell .cat-tag { font-family: 'DM Sans', sans-serif; font-size: 0.55rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; line-height: 1; }
+  .cat-tag.team-tag { background: rgba(93, 162, 97, 0.1); color: var(--text-dim); }
+  .cat-tag.nation-tag { background: rgba(46, 123, 191, 0.1); color: var(--blue); }
+  .cat-tag.goals-tag { background: rgba(200, 164, 21, 0.12); color: var(--gold); }
+  .cat-tag.champ-tag { background: rgba(58, 138, 63, 0.1); color: var(--correct); }
+  .cat-tag.scorer-tag { background: rgba(192, 57, 43, 0.1); color: var(--wrong); }
+  .cat-tag.league-tag { background: rgba(52, 152, 219, 0.12); color: #2980b9; }
+
+  .cell { background: var(--surface); border: 1px solid var(--border); min-height: 80px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden; padding: 6px; text-align: center; }
+  .cell:hover:not(.filled):not(.wrong) { background: var(--surface-hover); border-color: rgba(93, 162, 97, 0.6); box-shadow: inset 0 0 20px rgba(93, 162, 97, 0.08); }
+  .cell.selected { border-color: var(--accent) !important; box-shadow: 0 0 16px var(--accent-glow), inset 0 0 20px rgba(93, 162, 97, 0.06); z-index: 2; }
+  .cell.filled { background: rgba(93, 162, 97, 0.08); border-color: rgba(58, 138, 63, 0.4); cursor: default; }
+  .cell.filled .player-name { font-weight: 600; font-size: 0.76rem; color: var(--correct); line-height: 1.25; }
+  .cell.filled .player-rarity { font-size: 0.62rem; color: var(--text-dim); margin-top: 2px; }
+  .cell.wrong { background: rgba(192, 57, 43, 0.06); border-color: rgba(192, 57, 43, 0.35); cursor: default; }
+  .cell.wrong::after { content: '✕'; font-size: 1.6rem; color: rgba(192, 57, 43, 0.45); font-weight: 300; }
+
+  /* Search overlay */
+  .search-overlay { display: none; position: fixed; inset: 0; background: rgba(240, 245, 241, 0.9); backdrop-filter: blur(8px); z-index: 100; align-items: flex-start; justify-content: center; padding-top: min(18vh, 130px); }
+  .search-overlay.active { display: flex; }
+  .search-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 92%; max-width: 400px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,0.12); animation: slideUp 0.25s ease; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  .search-hint { padding: 10px 16px; font-size: 0.78rem; color: var(--text-muted); border-bottom: 1px solid var(--border); text-align: center; font-weight: 500; }
+  .search-input-wrap { display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--border); }
+  .search-input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 1rem; padding: 14px 12px; }
+  .search-results { max-height: 260px; overflow-y: auto; }
+  .search-result { padding: 11px 16px; cursor: pointer; transition: background 0.15s; border-bottom: 1px solid rgba(194, 212, 196, 0.5); font-weight: 500; font-size: 0.9rem; color: var(--text); }
+  .search-result:hover { background: var(--surface-hover); }
+  .search-close { padding: 12px; text-align: center; color: var(--text-dim); font-size: 0.8rem; cursor: pointer; }
+
+  /* Game Over */
+  .game-over-overlay { display: none; position: fixed; inset: 0; background: rgba(240, 245, 241, 0.92); backdrop-filter: blur(12px); z-index: 200; align-items: center; justify-content: center; }
+  .game-over-overlay.active { display: flex; }
+  .game-over-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 36px 32px; text-align: center; max-width: 380px; width: 90%; }
+  .final-score { font-family: 'Bebas Neue', sans-serif; font-size: 3.5rem; color: var(--correct); margin: 12px 0; }
+  .btn-share { background: var(--accent); color: #fff; border: none; padding: 11px 28px; border-radius: 10px; font-weight: 600; cursor: pointer; margin-top: 20px; transition: 0.2s; }
+  .btn-share:hover { background: #4a8a4e; transform: translateY(-2px); }
+
+  .end-summary { text-align: center; padding: 20px; }
+
+  @media (max-width: 480px) {
+    .grid-container { grid-template-columns: 80px repeat(3, 1fr); }
+    .cell { min-height: 70px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <h1>SUPER LEAGUE GRID</h1>
+    <div class="subtitle">Das tägliche Fussball-Quiz</div>
+  </header>
+
+  <div class="stats-bar">
+    <div class="stat"><span>Punkte</span><span class="stat-value score" id="score">0</span></div>
+    <div class="stat"><span>Versuche</span><span class="stat-value guesses" id="guessesLeft">9</span></div>
+    <div class="stat"><span>Richtig</span><span class="stat-value" id="correctCount">0/9</span></div>
+  </div>
+
+  <div class="grid-wrapper">
+    <div class="grid-container" id="grid"></div>
+  </div>
+
+  <div class="end-summary" id="endSummary" style="display:none;">
+    <div id="endStats" style="margin-bottom:15px; font-size:1.1rem; font-weight:600; color:var(--text);"></div>
+    <button class="btn-share" id="btnShare">Ergebnis teilen</button>
+  </div>
+
+  <div class="how-to-play" style="text-align:center; padding: 20px; font-size: 0.8rem; color: var(--text-muted);">
+    Wähle ein Feld und finde einen Spieler, der beide Kriterien erfüllt.
+  </div>
+</div>
+
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box">
+    <div class="search-hint" id="searchHint"></div>
+    <div class="search-input-wrap">
+      <input class="search-input" id="searchInput" type="text" placeholder="Spieler suchen..." autocomplete="off">
+    </div>
+    <div class="search-results" id="searchResults"></div>
+    <div class="search-close" id="searchClose">Abbrechen</div>
+  </div>
+</div>
+
+<div class="game-over-overlay" id="gameOverOverlay">
+  <div class="game-over-card">
+    <h2 style="font-family:'Bebas Neue'; font-size:2.5rem;">SPIEL BEENDET</h2>
+    <div class="final-score" id="finalScore">0 <span>Punkte</span></div>
+    <p id="gameOverMsg"></p>
+    <button class="btn-share" id="btnCloseOverlay">Schliessen</button>
+  </div>
+</div>
+
+<script>
+// --- KONFIGURATION & LOGIK ---
+const CORNER_HTML = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABUCAYAAAB0mJL5AAAfJUlEQVR42u19eZhU1bXvb+19TlV301NNPUCHQRouk0KD8hLQp14NRJ+KKCgm3vAUg3E2MXpVTIz5PoNgIIQrGTReY0wU5YqgXpFojDIFLk4ICCYKtiDQXVXd9FhVZ9jr/cE5lUNR3fRQHTB5+/vqa5quc87e67fmtfY+hBM3CIAEwADszL8Fg8H+QohTiGgogGoAQwCUM3MYQCmAQgB5ADQi8jvXWcxsEpEFoJmZGwDUAfgcwF4i2svMn9q2/WljY+PnWZ4rnXnZzrxOCFH+3kM6P9PECAaDxUKIcUT0ZQCnM/MIIvoSgFKiY6fI3DVadXJtM4B9zLwLwJ+FEJuklB8cPHiwPWOeDED9IwJCAIQXhEgkUgFgKjNfDGCyEKKCiNLE9hBdebiVujlvzvjpziMNlvtMZt5HRG8y82rDMP7Y1NR0uKO5f9EBkd7FlJWVnc/MswFcSERBD/Fd1UUZ8+IMglKW72QDgjOuRSf3luQRJ2Y+AOAlAE9Fo9GNHa3liwaI8CxYj0QiVwG4iYgmekCwMwjlSoMAILKpnAzVo7KoFC1TXXklL8u15Jmr+7sUQriS8yaAR6LR6ErP3NBXqoz6Wj2Fw+FZRHQvEZ3qEEN1sDBJRGniKaWSRLQPwMfMvIeZ9xLRASFEzLKsFl3XW23bTgkhjuJYy7LyhBD5APoJIYJKqSCAAUT0JWYeTESDmXmgEMLvUVde5hAeG5eWHGbeopR6MB6Pv9SX0kJ9IBUKAEKh0BlCiIeI6F+dBdkesJRHVbhc2wTgHQDrmXmLZVkfHj58eH8fLForLy+vsm17lONEnAVgAhEVeaTHcqXUfT4RSefvLyql/j0ej+/O0AInHSAux2iRSOR+AHcTkZYFCBCRcBbXAOAPzLwKwLpYLHawA5BFJ4b6eGvzrjGbikMwGBygadq5SqlLAUyVUhY6ktPR3FuVUvfHYrHFuZaWXAGiAbAikchQZn5SSjlZKeXqZOlKhIfL3gXwOICV0Wj0UBbid2SUc7VmyrBbaZBKS0sH6bo+E8C1RDTSI93CE6NIIQSUUi8T0XX19fV1Lg1OBkA0AFYoFDpPCPE0EZUxs+UJsiwi0gBAKbVJCPGT+vr61V7bkcW9PRHxmMiIj/yhUGgGEX1PCDHOA0w6mHU0wB6l1JXxePztXIBCOQLj34QQ/+lRUe6kWQghbNv+RAhxf319/e8zrrVPIAid2UHhIaxeVlY2B8APAFRmSIvLbK1KqStisdia3oIicwDG9VLKx50JsqtPiUgQESml/sO27VnxeHxrRrpE4eQcR7m/AKy2tra3+/Xr9zulVJkQosaj6ty15gGYlZeXtyORSOx0aKP+nhLi2oz/S0RPZOMaZq5TSn3L4ybmRMeeoJGeeyQS+SYRLQNQ6NEGLoCKmS/ujaRQD6XKDgaDUzRNe9WJK9JgCCE0pdRWIcSVdXV1e09i1dTTZKgVDodriOh5Ihri2EvNA0pCKXW2Y1O67X1RD/SrCofDw4jofwCUeII8Swih2ba9lohmRKPR1i+4VHQqLeFwuJKIXiai8R5JsYlIMvM+IcTpdXV1UY966zKBu+UuVldX+wE8R0SlzoOEq6Zs2341Fotd4oAh/wHBcINGGYvFDhqGcT4zv+248zYAycwWEX3Jtu2nMjISOTfqLgcs1DRtukdUXfdvS15e3oXNzc0pbyD1DzoYgEylUu1FRUWrAVxGRCGPobeklMPy8vLaEonEBo8jkzOVJQHYgUDgK7qub3REVAOgiIiY+QAzn+FE2n2eET2JhkuXMZqmbQLQz0NTBcBUSo2Lx+N/6arqEt3hCE3TlmWksNkJ+K52wND+icBwg0itsbFxBzPPddIqbroFRJRHREscOnWJ+bsCiAZARSKRfyOimkwDppR6KB6Pv/kPasC7alO0WCy2XCn1GydQdO2JLYT4WiQSmer+X29VFgFAVVVVXjKZ/FAIMYiddKijqv4SjUbHOpPq69QHedxrr+RyB7kqZKRk+npuVFJSUqLr+odCiDK36OYw7f/EYrEvd0VtiS7oSE4mk1cJIQZ7Yg4GQEqpOwGkuph97WkaQ/M803bAdz82ESnvJ8t3vPUXrbteTzdUumhqamoE8ANHdbEjJUoIMTEYDH7VY/R7JSEiHA6/I4Q4zQEEjq+9LhqNnt0HRjyzZgIAOPvss0sPHDgwPJVKDU+lUtWGYQw0TTOklCpiZpfIpqZprVLKaF5e3j6/3/9XXdc/ampq+qvjinuBphxLNXnotU0IMdLRJkxEQim1NhaLXXA8D5SO50FEIpEziWi9RzoUEQnLsqY0NDS8lkNAjmkmGDp06OhUKnVBIpE4v729vcayrDIpJfLz81FUVITi4mIUFBTA7/eDiGBZFlpbW9HU1ISmpiYkEgkwM0pKSg4Q0TvMvBbAq9Fo9JPMdeYyaIxEIrOFEL9RSnkTrRYzj4nFYn/pDBTqQkT6SyHEXLdY40jHe9FodEJ3o9DjgQ8A5eXl/ZRSM4jomtbW1jNt25bhcBijR4/GhAkTeOzYsWr48OFcXl6O4uJiysvLg6ZpcLw9JJNJNDU18eeff46PPvqItm7dKp9++mm45WGlVBLAnwD8OhqNvuioNcrRWggAKisr8y3L+oiIqhxGVkSkKaV+GIvFHujMAaJObsyVlZUFlmX9FUB/HF0DuCUajT6SA8/KKxW+SCRyPRHdRkRDTdPEpEmTcPnll1vnnHMODR48WGSbr1Iq3cBARBDiWBOxdOlSvuOOO1QkEmHLsjRPA8Q2Zl4UjUafymEC1GXkBVLKu5RSFo40bAil1AexWKymMyeDOuPYUCh0jpTyTw7KBICYuY2Zh8fj8QO9jMjT14bD4QuEEPOJaKwQAvF43L7hhhuwZMmSNAiWZcG27TSnZ3aVpK2rp69LqSNT8/v9mDFjBl5++WUEg0E2TVM595AOqBuUUnc2NDRszoG0SAB2OBweL4R4O6Opjy3LGtvY2LijI9qJzkRPCPFVj+uonIVvzAEYEoCqrKwsCIfDPxdCvAJgrFLKsixLlZSUyJtvvlkyMyUSCZimCSKCpmmQUkIIkRUYFxxXUjRNg1NqxZIlS1BZWYlkMklSSul6QE6scKaUcn0oFHoAf6uH9LRWZAOgWCy2TSm1y+laYQC2EEJIKc/rjPYdAeIS+kyvCnP+/SqOLnn2RKTtYDA40rKsDVLKGxzCKCml1tzcLC688EJUV1fDNE34fL6saqjLYigELMtCVVUVFi9ejPb2di+Iwg3gnEzED8Lh8NqysrLyrgZyx7GJf3KepTzSe1ZnYYLoQDpUIBAoYebRzk2EOzml1KZeBFpulfFcKeUGIqpxdSwAwczQdR3XXXddbhNOUsIwDEyfPh1z5sxBNBqFpmleYNy1WUKIKUqpjYFAYLSbGunpc5VSWz0qy6X1WE+KiboKCKSUpzgZzHQbp1KqwbbtjzKkqLvG7iIhxBoiCnqSlBBCoKWlBZMmTcKkSZNgWRaOaJYcRZhCwLZt/PjHP0ZNTQ3a2tpg23ZatUkpSQihMbMlhBiqadqfQqHQ6W5qpLtYODTc5sQi0rG/APClQCBQ2ZEN7xAQpdRgj7i5RnCv04RM3ZQQF4wLiGglAL/jKMhM1TJnzpw08XKa23C6FIuLi1FSUgJmRiAQQGtrK6LRKBobG5FIJABAE0LYmqZFNE1bG4lE3NRQd7iDHUdkr9N7lk7GCiH8uq5XdRsQIqrIouv2Z7nOtSeiE31qhUKhM4jov5zkm/J+XwiBtrY2jB49GhdddBGUUjmVDgCwbRuapuG1117DH//4R3zrW9/Cpk2bsHr1aixcuBBXXHEFqqurAQCNjY0yGo3abW1tQSL678rKyoGOihGduO7HuOUzZ840fT5fytNMrpy5lHXGuR2Nfp4mZReU1sw0AY6tl3u9LwFABYPBAUKIVURU4MkWH6VO2tvbcfXVV6OgoACpVCod7OVSZTEzfvazn6GoqAg33XQTIpEIzjvvPJx33hHHJ5lMYu/evdixYwfee+89uXXrVnvr1q0D/H7/C1VVVWfu37/fyNAOMsv63aYHDBs2jHw+HxmGcZTkMHNJRxKiHU/sOohb0q5cIBAo0TRtMDMnnLSA8oDius/Liah/NjCICKlUCpWVlfj6178OZu4T6fD5fNi0aRPWrFmDb3/72zjllFOQSqXSqoyI4Pf7MXLkSIwcORIzZ84EAPnwww9b3//+98eHQqFfApjtCR5dZpTBYHC4pmkaEe2pq6trc5OhxcXFmVsp3DXndzvbexyi8KhRo3zhcHiBruu7AbxPRDsjkcimcDh8lgOG7gSXP5JSnunpZjxq6LqOtrY2zJ49GxUVFTAMA51tQ+ip/QCAJUuWwO/34+abbwYzQwgBKWU6vrFtG6ZpwjAMpFIpmKaJO++8U5s1a5YVj8e/OXjw4NkOGLpTI5oRiUS2SSl3MPMHSqldkUjkTpcZm5ubqYP5cG8KVNkkRNXX1/9eSnkXM7u2RiOirxDR6w4oZiQSOVNKea/j2kovgVy3s6mpCYZhID8/v29KerYNXdfx3nvvYdWqVbjiiiswatQoWJZ1THzjBpQuSO71ixcvltXV1aqhoWHpwIEDhwAwQ6HQ1US0gohG42+7sr4khFgYDofnA+D6+vpuB1AdRuq2bYsODDTC4fDXhBAzlFKGV7Uxs0FEPiJ6GICPmX/hsTfkAmHbNuLxOJLJJKZMmYKJEydi3rx5WLZsGfx+f049LFc6li5dCmbGbbfddlSKpSuucjAYpMWLF7NlWcWGYSyurq72E9FP+ciwPOtXTixzd1FR0fCFCxe2M/MxWoGZO9wBJrJIgOa4Z+2deGAXe2yF98Y+x+8eFg6H/0MIMcYp0EhN02AYBqLRKPLy8nDttdfi1VdfxfPPP4+VK1di4sSJuPnmm/HII4/A5/PlBBSlFDRNw+7du/Hss89i2rRpGD9+PEzT7LKdcoPKKVOmyMsvv5wbGxuntbW1LSKigIdeR9GTiJCfnz9T13Vv8Odl3Hrndy0TGC2Ld5QMh8OVAM53iOv1KtwC1UBPFS8baAEimiuEYGYWbW1tMAwDw4YNw6xZs/CNb3wDQ4YMAQAYhoH+/ftj9erVmD59Om655RYwM2655RYYhpHOW/WojOcY62XLliGRSOD222/vsnRki2HuvfdeWrNmDSzLuqmzOMzJOIxy5i0yPFMWQkyNRCKveYpmaRoLLxglJSWlkUhkERHtIKJLnYn3xOUhAHz48GFqaWnBhAkT8Mtf/hIbNmzAfffdhyFDhsAwjDSnGoaBiooKrFq1CpMmTcKtt96KpUuXwufzHZVe72jxbmbXtm1YlgXLsmCaJjRNQ21tLZ566ilMnToVkydP7lEGQAgB0zQxYsQIzJgxA01NTaxpGh0HRNuzXS4tcI4zcT2AHZFI5C5XI7lYuDVmFQgERmua9rwQ4l8cIqieJhCJCLZt08UXX4w5c+bg/PPPTxMhlUqlDWemWigvL8cLL7yA6dOn47bbbkvrfNc99XK9N6Pb2fj5z3+OpqYm3H777e68ehzjMDPmzp2L5cuXUxdUKnWQYiJmVkQ0iIgWhMPhi5n5SjeDrgHgQCAwUEr5OhFVKKVM9KIZQEqJxsZGXHXVVXjiiSfSnoqrfjoihgtKWVkZXnjhBVx22WW4/fbboZTCd77znQ4J1NLSgsOHDyMWi6G+vh4HDx7EgQMHcPDgQRw8eBCvvfYazjnnHEydOrVXYLhucU1NDSZPnow33ngDJSUlPbV1wnUIpJRnKqXWBoPByQ0NDa0aAJZSPiqldMHQc+HZXHbZZVBKIZVKwefzdUlNeEFZuXIlpk+fju9+97tobW3FV77yFezfvx+HDh1KE7u+vh7xeByHDx9GW1sbkskkLMtKS5Gu69B1HQ0NDWhsbEznsHpqk1xAL730UvzhD3/obbxEAHSllOE4Pw8BuFGLRCJTiGiqU5DvNRhKKeTl5WHAgAFdUinHA+Xyyy/HAw88gLy8PBiGkSaoN6DTNA26rqebHbyGm4iwc+dOPPjgg1i0aBEMw+hxJsC9d1VVFTRN67Zz0MHQlVKKiOaEQqGfCQDXIcc9VR3VtrsDSiKRQHl5OWbNmgUhBAKBAMLhMCKRCMLhMEpLS9GvXz/4/X5IKcHMRxl127bTv4dCITz22GPYvHlzTlxqtzScK3LhSKuQD8BVAsCXnUAlJw1kLgf3BhBvMvCzzz5LqwuX2C7BXQ/seJzqlnHvueeedDk4R9yda1C+Kpi5vKPMYy4i5N5cT0Q4dOhQGpzepE+Ki4uxYcMGPProo9B1vcdc7iY/cwyoUEqRrutnCEdUTrrhSlhdXV1OCGDbNkpKSjB//nzU1tZC07QegUJE2Lx5c67VlntvXfQVQXtDQJcLU6kUYrFYTmojzAyfz4dYLIb77ruv21KnlIKu6/j444/xi1/8AkVFRX0CisBJOtxM8OHDh3Pm0ViWhUAggBUrVuCll17qloF3beODDz6IxsZG+Hy+PrFDJ62EAEBDQwNaWlpyqrOZGXl5eZg3bx6am5u7dG+3wLVu3TqsWLECgUAAltU3W2HEyQaG9/r6+nokEolee2yZqqegoAC7du3CggULIKWEaZpHeW3Z7JllWXjggQdy4rB0Gi7gJB6HDh3qkwqiZVkIBoNYtmwZ3nnnHeTn58Pn80HX9bSL7LrWhmFA0zQ888wzWL9+PYqLi3PeEdNR+v2kGS6XHjx4EEqpPuFI162+/vrrMXv2bIwePRpDhw5FZWUlfL6jHc/m5mbMnz8f/fr16w4Y3BMtpJ3MEnLgwIE+Uw+uKtqxYwduvfVWAEBBQQEGDRqEkSNH4rTTTsOoUaNw6qmn4sknn8Qnn3yCUCjUHdvBpmnSoEGDfF94QFwQDhw40OugMOuiNQ0tLS2orKzEc889ByEEPvjgA+zYsQM7d+7Ehg0bsHLlyvR3CwsLUVpa2meG3KsZugsIdYegvQHEtm3U1dXlMomXJnBra2s6eTlmzBgAwLnnnpv+TkNDA2pra/Hxxx/jz3/+M55++uk+iTmyYaJ1E8FEX3OIbdvw+48cVO0GhbkCxAUjEolg9erVGDNmDJLJZFoK3SxyMBhEMBhETU0NZs6cic2bN2PHjh0oKCjoU2CIiAQzG924wOwqh7vdJd0BQtM0+P1+HD58GAsWLMCePXuOSqnnCowXX3wRY8aMQSqVgq7rR6XyXS/MNE20t7dDKYXTTjvtqKplV02UruuMv+1S7opWaBIADmV4Bb1SWUQEwzAQj8chpey0Ju7WwTVNg8/nQ11dHR5++GGMGzcOd999N8rLy2EYBtra2jK3D/RKMkaPHt1pu6q3P0sIgQkTJvSmsNUVutpExLZtbxQA1ns3leRi6LqOa6+9Fs888wz8fv8x0uICoes6fD4f9u3bhx/96EcYP3487rrrLhQVFeFXv/oVNmzYgKeffhrDhw9HNBrtUZupC0Y4HE6rqa72DrsB6bhx41BQUNCn8YfD7BsEgF/l0mgyMzRNQ0NDA6655hpcc801iEaj8Pl86WDLBWLv3r245557UFNTg/vvvx/9+/fHk08+iS1btmDu3LmIRCK44IIL8NZbb2HevHlQSqGpqanL0uIFw6umupqsdOsmw4cPR//+/bsVpHZDmtxDGNqFEMtFLBZbz8wvCCEkADNXoOi6jkAggN///vc499xz8dZbb8Hv98Pn82HPnj343ve+h5qaGjz00EMYOXIknnvuOWzcuBHf/OY3kZ+fD8MwYFkWDMNAQUEBfvjDH+L111/Heeedh3g8nm7z6QvJ8BLVsiyUlJRgxIgR6Y6ZHA9THLnp0rq6ur3uGes3KqVqiUh3QOFcgGLbNsLhMD777DNcdtlluPHGG3HDDTegpqYGixYtwumnn47Vq1fjzTffxMyZM+F2N9q2DSll2utxmyXGjRuHl156CY8++ihCoRBisRiEEMcQyQUjFAph9erVOPXUU3u8xcH1qmpqatLVxu4Ehg5Ns97aAcNn2/bmfv36PQBACgBwDjM+n5nfFULozs7RzDNDrJ4YM8uyUFBQACklHn/8cTzxxBOYPHky1q5di9dffx2XXHIJgCMdjO5GnWw7azVNg2masCwLs2fPxvr16zF37ly0tbWljb6r91tbWxEMBnsNhlf1TJgwweuCqy5c52XqTDoqIhJCCF0p9cdUKnVRbW1tEgC77aMiGo1+HI1GJ9u2/QNm/pyIpBBCcz55zv47rZtGyj1PC+6RGJMnT8Yrr7yCKVOmpFUSgKxAZDOy7n6SiooKPPLII3jxxRcxduxYRKPR9N+CwSBWrVqVdld7U+By5zRq1CiEQiGYpsnuUenHkSyhaRorpdihoe7S0wk3/mLb9m3RaHRKS0tL3KGXooxUvAKAQCBQIqWcLIT4F2YudSaWMk3zpcbGxu1lZWUvAbgo2wYcZ7Qw804hxJfd/mAigmmaCIfD2LhxI4LBYK96pNz2UZ/PB8MwsGTJEvzkJz8BALz88suYOHFiTndiSSkxefJk3r59O+Xn529l5vEdrN0iIi0/P//52traGc5ZWZOco9chhKhn5h2xWGyLJ0ZJM6+WodMIgGhsbGwC8IrzyYb+XiFEtpN03C1bkoi+zcyvEFGlsw9d+Hw+HDx4ELt378ZZZ53V6x4pt4dLCIG77roLO3fuxKpVqzBo0KCc7VN0i1Pbt2+39+zZI30+3yYi+i6AzZ5m9GMttWlud8zBWgBrO8IZGScSiSwEdVvopQOY96M7gLzoORPKe0CY6dif7dFodJtS6t/hOaZCCIFkMon33nvvqDR7bznXdafPOOMMNDc348MPP0zXNXrrmDieFt9xxx3c1NTEhYWFd9TV1W1h5oPOWk3P+m0425/b2trc81P0LHTs8OVjohODnM2omwBEQ0PD60qp/3QcAHePCDkdLK0AbgQg4/H475h5hbPz1nIDu3feeScnSUivbZFSYvTo0QCAXbt25QRwN2ZauHCh/dZbb2mhUGhBbW3tZiduuNFZg+5Zv3TChx83NTXtcQhvZqFjhwdL98SpZscJmKOUupeZa52HNiul/qCUOjsWi73r3t8wjOuZudY5nkj5/X7s3LkTyWQyZ4lDF9jq6moUFBRg27ZtvQbcsiz4/X6sWbPGnj9/vhYIBDYPHTr0+y53x+PxVUqpC5l5M4AEgBQz77Qs64ZoNDoPPXyRWK9ZtKqqKj+VSvVn5nbPC1lcB8E9lvx/SSnXOb8LZqZ169Zh5MiRME2z18GWu4HT7U4vKSnBhg0beqyyXDC2bdumLrjgApFKpaKlpaWn79mz5zPP2tJOUGVl5UCllKyrq6v12OIT0hops0icyFYEC4VCV5eVlXFFRYXp8/nUM888w7ZtczKZZMuyev1JpVLMzDxz5kyORCIcj8eZmdk0zW7dJ5lMMjPz7t277erqaru4uNgYPHjw/+5gvbILNOme+u2tE4KjTwvN9kohC4AWj8d/Z9v295zD+u13332Xc2F4vVLCzBgzZgxisRj27duX3uZs23aXVKMrGR988IG6+OKLUVdXJ0pLS7/x6aefrkP2M4ntDEYkfIHOLdYAoLy8/J5wOMxDhgyx3n77bZuZOZVKdZuTMz/t7e3MzPzGG28wAP7tb3/LmcM0TU4mk5xKpdgwjPQzDcNgwzCYmXnt2rV2VVUVFxcX88CBA6/2zv1EqJy+HAqA1tbWtq6kpKShpaXl/yxfvpwqKirs8ePHC3cfX3ftiVtv8fv9ME0Ty5cvx5YtW/D+++/j/fffx759+9L74IuKitKFKDdGceMMKSUWL15s3XTTTdKyrGRpaemVn3322bP4JzggWnMM4aXhcPhwXl4eX3fddeaBAwcUM6ftwfEkxjTNtN1gZn7llVd40qRJ7Pf7uby8nIPBIPt8PtZ1nYuKinjo0KH8ta99je+++25esWIF79q1ixOJhGsv1LRp00yfz8dlZWWf9u/ff9LfWzJOClAqKipGVlRUrM/Ly+Pq6mp+7LHHzGQyqfjIDnxOJpNsGEaHBpyZefv27Txr1iwuKCjgwsJCrqio4Egkwo4DwZWVlVxeXs6BQIALCgpY13X2+/0ciUT4jDPOUFdeeaU5ePBgzsvL4wEDBqxy3tF7wsCgEwiKe5KOGDhw4J3Nzc3zEolE0fjx43HjjTda06ZNk0VFReSqFdcwuyonGo3ipz/9KX7961+jubkZgUDgqIMvs8UqbmnWkUTbMAzNNE3k5+cfys/P/8Hnn3/+WMbc/qkAcb0TBsADBgwYBuDu5ubmq03T9A0fPhzTp0+3L7nkEpx66qlC13VyckT4zW9+g0WLFuGTTz5BIBBI75Dtgg1TbkTtBI0tUsrHdV1fUFtbewh98ObOLxogmdKCqqqqMcz87dbW1pmJRKKssLAQI0aMwFlnnYVTTjnFfvbZZ7Fu3ToqLCyk/Px82LZNmUexen66yT/hfc8uM+9j5t9JKR9z3pN1QqXiZAQEmX78iBEjQolEYkoikZjW1tb2ZdM0BwFHzuAtLCyEUqpT9ZQRozAzfwJggxBiNTO/7jnW4piM6/8HJHu0n3Y1J02aVBSLxcYmEokJpmmOtSxrGIBK533shW4W2jmNqI2Z40T0OYCPALwvhHhX1/UP9u/fn8hwLLK+G/dEjv8HkWKS6VKzxIEAAAAASUVORK5CYII=" alt="ball">`;
+
+let state = {
+  rows: [], cols: [],
+  guessesLeft: 9, score: 0, correct: 0,
+  cells: {}, usedPlayers: new Set(),
+  selectedCell: null, gameOver: false
+};
+
+function seedForDate(date) {
+  const dateStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  let h = 0;
+  for (let i = 0; i < dateStr.length; i++) h = ((h << 5) - h + dateStr.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function createRng(seed) {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+let rng = createRng(seedForDate(new Date()));
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Statische Definitionen der Kategorien für das Grid-Generation (muss mit Backend übereinstimmen)
+const NATIONS = ["SUI","FRA","BRA","GER","ITA","POR","ESP","ARG","CRO","SRB","AUT","ALB","KVX"];
+const TEAMS = ["Basel","Young Boys","Zürich","Grasshopper","Luzern","Sion","St. Gallen","Servette","Thun","Lugano","Aarau","Winterthur","Vaduz","Xamax","Lausanne-Sport"];
+
+function generateGrid() {
+  const shuffledTeams = shuffle(TEAMS);
+  const rows = shuffledTeams.slice(0, 3).map(t => ({ type: 'team', value: t, label: t, tag: 'Verein', tagClass: 'team-tag' }));
+  
+  // Mix aus Nationen und weiteren Teams für Spalten
+  const colPool = [
+    ...shuffledTeams.slice(3, 6).map(t => ({ type: 'team', value: t, label: t, tag: 'Verein', tagClass: 'team-tag' })),
+    ...shuffle(NATIONS).slice(0, 3).map(n => ({ type: 'nation', value: n, label: NATION_NAMES[n] || n, tag: 'Nation', tagClass: 'nation-tag' })),
+    { type: 'goals', value: 50, label: '> 50 Tore', tag: 'Tore', tagClass: 'goals-tag' },
+    { type: 'champion', label: 'Meister', tag: 'Titel', tagClass: 'champ-tag' }
+  ];
+  
+  const cols = shuffle(colPool).slice(0, 3);
+  return { rows, cols };
+}
+
+function headerHTML(cat) {
+  if (cat.type === 'team') {
+    const logo = TEAM_LOGOS[cat.value];
+    return logo ? `<img class="team-logo" src="data:image/png;base64,${logo}" alt="${cat.label}"><span class="header-label">${cat.label}</span>` : `<span class="cat-tag team-tag">Verein</span>${cat.label}`;
+  }
+  return `<span class="cat-tag ${cat.tagClass}">${cat.tag}</span>${cat.label}`;
+}
+
+async function initGame() {
+  const { rows, cols } = generateGrid();
+  state.rows = rows;
+  state.cols = cols;
+  renderGrid();
+}
+
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '<div class="corner">' + CORNER_HTML + '</div>';
+
+  state.cols.forEach(cat => {
+    const el = document.createElement('div');
+    el.className = 'header-cell col-header';
+    el.innerHTML = headerHTML(cat);
+    grid.appendChild(el);
+  });
+
+  for (let r = 0; r < 3; r++) {
+    const rowH = document.createElement('div');
+    rowH.className = 'header-cell row-header';
+    rowH.innerHTML = headerHTML(state.rows[r]);
+    grid.appendChild(rowH);
+
+    for (let c = 0; c < 3; c++) {
+      const key = `${r}-${c}`;
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.key = key;
+
+      const data = state.cells[key];
+      if (data && data.player) {
+        cell.classList.add('filled');
+        cell.innerHTML = `<div><div class="player-name">${data.player}</div><div class="player-rarity">${data.rarity} Pkt.</div></div>`;
+      } else if (data === false) {
+        cell.classList.add('wrong');
+      } else {
+        cell.addEventListener('click', () => {
+          if (!state.gameOver) {
+            state.selectedCell = key;
+            document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected'));
+            cell.classList.add('selected');
+            openSearch(key);
+          }
+        });
+      }
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function openSearch(key) {
+  const [r, c] = key.split('-').map(Number);
+  document.getElementById('searchHint').textContent = `${state.rows[r].label} ∩ ${state.cols[c].label}`;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchOverlay').classList.add('active');
+  document.getElementById('searchInput').focus();
+  document.getElementById('searchResults').innerHTML = '';
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').classList.remove('active');
+  document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected'));
+}
+
+async function renderSearchResults(query) {
+  const results = document.getElementById('searchResults');
+  const q = query.trim();
+  if (q.length < 2) return;
+
+  const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  const matches = await response.json();
+
+  if (matches.length === 0) {
+    results.innerHTML = `<div class="search-no-results">Kein Spieler gefunden</div>`;
+    return;
+  }
+
+  results.innerHTML = matches.map(p => `<div class="search-result" data-name="${p.n}">${p.n}</div>`).join('');
+  results.querySelectorAll('.search-result').forEach(el => {
+    el.addEventListener('click', () => makeGuess(el.dataset.name, state.selectedCell));
+  });
+}
+
+async function makeGuess(playerName, key) {
+  const [r, c] = key.split('-').map(Number);
+  const rowCat = state.rows[r];
+  const colCat = state.cols[c];
+  closeSearch();
+
+  const response = await fetch('/api/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playerName, rowCat, colCat, cellId: key })
+  });
+  
+  const result = await response.json();
+
+  if (result.correct) {
+    state.cells[key] = { player: playerName, rarity: result.rarity };
+    state.score = Math.round((state.score + parseFloat(result.rarity)) * 10) / 10;
+    state.correct++;
+    state.usedPlayers.add(playerName);
+  } else {
+    state.cells[key] = false;
+  }
+
+  state.guessesLeft--;
+  updateStats();
+  renderGrid();
+  if (state.guessesLeft === 0 || state.correct === 9) endGame();
+}
+
+function updateStats() {
+  document.getElementById('score').textContent = state.score;
+  document.getElementById('guessesLeft').textContent = state.guessesLeft;
+  document.getElementById('correctCount').textContent = `${state.correct}/9`;
+}
+
+function endGame() {
+  state.gameOver = true;
+  document.getElementById('endSummary').style.display = 'block';
+  document.getElementById('finalScore').innerHTML = `${state.score} <span>Punkte</span>`;
+  document.getElementById('gameOverOverlay').classList.add('active');
+}
+
+document.getElementById('searchInput').addEventListener('input', e => renderSearchResults(e.target.value));
+document.getElementById('searchClose').addEventListener('click', closeSearch);
+document.getElementById('btnCloseOverlay').addEventListener('click', () => document.getElementById('gameOverOverlay').classList.remove('active'));
+
+initGame();
+</script>
+</body>
+</html>
