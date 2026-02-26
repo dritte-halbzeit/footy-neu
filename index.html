@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super League Grid</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #f0f5f1; --surface: #ffffff; --border: #c2d4c4; --accent: #5da261; --correct: #3a8a3f; --wrong: #c0392b; --text: #1a2e1c; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; }
+  .header { text-align: center; padding: 20px; }
+  .header h1 { font-family: 'Bebas Neue'; font-size: 3rem; }
+  .grid-container { display: grid; grid-template-columns: 110px repeat(3, 1fr); gap: 4px; max-width: 560px; width: 100%; margin: 0 auto; }
+  .header-cell { background: var(--surface); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-family: 'Bebas Neue'; min-height: 65px; border-radius: 5px; }
+  .team-logo { width: 32px; height: 32px; object-fit: contain; margin-bottom: 2px; }
+  .corner img { width: 45px; height: auto; }
+  .cell { background: var(--surface); border: 1px solid var(--border); min-height: 85px; display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: 5px; border-radius: 5px; }
+  .cell.filled { background: #e8f5e9; color: var(--correct); font-weight: bold; }
+  .cell.wrong { background: #ffebee; }
+  .search-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; }
+  .search-overlay.active { display: flex; }
+  .search-box { background: white; width: 90%; max-width: 400px; border-radius: 12px; padding: 20px; }
+  .search-input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 6px; }
+  .search-result { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="header"><h1>SUPER LEAGUE GRID</h1></div>
+  <div style="text-align:center; margin-bottom:10px;">Punkte: <span id="score" style="font-weight:bold">0</span></div>
+  <div class="grid-container" id="grid"></div>
+</div>
+
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box">
+    <div id="searchHint" style="margin-bottom:10px; font-weight:bold;"></div>
+    <input type="text" class="search-input" id="searchInput" placeholder="Spieler suchen...">
+    <div id="searchResults" style="max-height:250px; overflow-y:auto;"></div>
+    <div onclick="closeSearch()" style="text-align:center; color:red; cursor:pointer; margin-top:10px;">Abbrechen</div>
+  </div>
+</div>
+
+<script>
+let state = { rows: [], cols: [], score: 0, cells: {}, selectedCell: null };
+
+function generateGrid() {
+  return {
+    rows: [{type:'team', value:'Basel', label:'Basel'}, {type:'team', value:'Young Boys', label:'YB'}, {type:'team', value:'Zürich', label:'Zürich'}],
+    cols: [{type:'team', value:'Luzern', label:'Luzern'}, {type:'nation', value:'SUI', label:'Schweiz'}, {type:'goals', value:50, label:'>50 Tore'}]
+  };
+}
+
+function headerHTML(cat) {
+  if (cat.type === 'team') {
+    // Ersetzt ü durch u für den Dateinamen (Zürich -> Zurich.png)
+    const safeName = cat.value.replace(/ü/g, 'u');
+    return `<img class="team-logo" src="/logos/${safeName}.png" onerror="this.style.display='none'"><span>${cat.label}</span>`;
+  }
+  return `<span>${cat.label}</span>`;
+}
+
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = `<div class="header-cell corner"><img src="/logos/corner.png" style="width:45px"></div>`;
+  state.cols.forEach(c => grid.innerHTML += `<div class="header-cell">${headerHTML(c)}</div>`);
+  for (let r = 0; r < 3; r++) {
+    grid.innerHTML += `<div class="header-cell">${headerHTML(state.rows[r])}</div>`;
+    for (let c = 0; c < 3; c++) {
+      const key = `${r}-${c}`;
+      const data = state.cells[key];
+      if (data) {
+        grid.innerHTML += `<div class="cell filled">${data.player}<br><small>${data.rarity} Pkt</small></div>`;
+      } else if (data === false) {
+        grid.innerHTML += `<div class="cell wrong">✕</div>`;
+      } else {
+        grid.innerHTML += `<div class="cell" onclick="openSearch('${key}')"></div>`;
+      }
+    }
+  }
+}
+
+function openSearch(key) {
+  state.selectedCell = key;
+  const [r, c] = key.split('-').map(Number);
+  document.getElementById('searchHint').innerText = `${state.rows[r].label} + ${state.cols[c].label}`;
+  document.getElementById('searchOverlay').classList.add('active');
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+}
+
+function closeSearch() { document.getElementById('searchOverlay').classList.remove('active'); }
+
+async function searchPlayers(q) {
+  if (q.length < 2) return;
+  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  const data = await res.json();
+  const results = document.getElementById('searchResults');
+  results.innerHTML = '';
+  data.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'search-result';
+    div.textContent = p.n;
+    div.onclick = () => makeGuess(p.n);
+    results.appendChild(div);
+  });
+}
+
+async function makeGuess(playerName) {
+  const key = state.selectedCell;
+  const [r, c] = key.split('-').map(Number);
+  closeSearch();
+  const res = await fetch('/api/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playerName, rowCat: state.rows[r], colCat: state.cols[c], cellId: key })
+  });
+  const result = await res.json();
+  if (result.correct) {
+    state.cells[key] = { player: playerName, rarity: result.rarity };
+    state.score = Math.round((state.score + parseFloat(result.rarity)) * 10) / 10;
+  } else {
+    state.cells[key] = false;
+  }
+  document.getElementById('score').innerText = state.score;
+  renderGrid();
+}
+
+document.getElementById('searchInput').oninput = (e) => searchPlayers(e.target.value);
+const gd = generateGrid();
+state.rows = gd.rows; state.cols = gd.cols;
+renderGrid();
+</script>
+</body>
+</html>
