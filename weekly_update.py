@@ -8,167 +8,149 @@ import re
 
 DB_NAME = 'schweizer_fussball_grid.db'
 
-# Wir nutzen eine globale Session für alle Anfragen (Connection Reuse)
+# Wir nutzen eine globale Session für alle Anfragen
 SCRAPER = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'darwin', 'desktop': True})
 
-def get_current_league_ids():
-    """Scannt die Transfer-Listen nach allen Spieler-IDs der aktuellen Saison."""
-    # Wir nutzen die Transfer-Seiten, um Neuzugänge wie Essende sicher zu finden
+def clean_player_name(raw_name):
+    """
+    Entfernt Rückennummern (z.B. #99) und überschüssige Whitespaces.
+    Beispiel: '#99    Samuel Essende' -> 'Samuel Essende'
+    """
+    if not raw_name:
+        return ""
+    # Entfernt das Muster # (Zahlen) (Leerzeichen) am Anfang des Strings
+    clean_name = re.sub(r'^#\d+\s+', '', raw_name)
+    # Entfernt Zeilenumbrüche und doppelte Leerzeichen
+    clean_name = " ".join(clean_name.split())
+    return clean_name.strip()
+
+def cleanup_existing_database(cursor):
+    """
+    Säubert alle Namen in der Datenbank, die noch Rückennummern enthalten.
+    Dies korrigiert deine 5000+ bestehenden Einträge.
+    """
+    print("🧹 Suche nach Namen mit Rückennummern in der Datenbank...")
+    cursor.execute("SELECT tm_id, name FROM players WHERE name LIKE '#%'")
+    rows = cursor.fetchall()
+    
+    if rows:
+        print(f"   -> {len(rows)} Einträge zur Bereinigung gefunden.")
+        for tid, name in rows:
+            new_name = clean_player_name(name)
+            cursor.execute("UPDATE players SET name = ? WHERE tm_id = ?", (new_name, tid))
+        print("✅ Datenbank-Bereinigung abgeschlossen.")
+    else:
+        print("✅ Keine Namen mit Rückennummern gefunden.")
+
+def get_current_swiss_players_data():
+    """
+    Scant Super League und Challenge League Kader.
+    Gibt ein Dictionary {tm_id: cleaned_name} zurück.
+    """
     urls = [
-        "https://www.transfermarkt.ch/super-league/transfers/wettbewerb/C1",
-        "https://www.transfermarkt.ch/challenge-league/transfers/wettbewerb/C2"
+        "https://www.transfermarkt.ch/super-league/startseite/wettbewerb/C1",
+        "https://www.transfermarkt.ch/challenge-league/startseite/wettbewerb/C2"
     ]
-    found_ids = set()
+    found_players = {}
     for url in urls:
-        print(f"🔭 Scanne Transfer-Liste: {url}")
+        print(f"🔭 Scanne aktuelle Kaderliste: {url}")
         try:
-            res = SCRAPER.get(url, timeout=25)
-            if res.status_code != 200:
-                print(f"⚠️ Warnung: Status {res.status_code}")
-                continue
-                
+            res = SCRAPER.get(url, timeout=20)
             soup = BeautifulSoup(res.content, 'html.parser')
-            # Suche alle Spieler-Links in den Transfertabellen
-            links = soup.find_all('a', href=re.compile(r'/profil/spieler/(\d+)'))
+            
+            # Suche alle Spieler-Links in den Tabellen (Klasse 'hauptlink' ist spezifisch für Namen)
+            links = soup.select('td.hauptlink a[href*="/profil/spieler/"]')
             for link in links:
                 m = re.search(r'/spieler/(\d+)', link['href'])
                 if m:
-                    found_ids.add(int(m.group(1)))
-            time.sleep(4)
+                    tm_id = int(m.group(1))
+                    name = clean_player_name(link.text)
+                    if name:
+                        found_players[tm_id] = name
+            time.sleep(3)
         except Exception as e:
-            print(f"⚠️ Fehler beim Scannen der Transfer-Liste: {e}")
-            
-    return found_ids
+            print(f"❌ Fehler beim Scannen von {url}: {e}")
+    return found_players
 
-def get_complete_player_data(tm_id):
-    """Holt das VOLLSTÄNDIGE Profil eines Spielers (Stamm, Titel, Stats)."""
-    p_url = f"https://www.transfermarkt.ch/spieler/profil/spieler/{tm_id}"
+def get_player_stats(tm_id):
+    """Holt Leistungsdaten (Einsätze, Tore, Assists) von Transfermarkt."""
     s_url = f"https://www.transfermarkt.ch/spieler/leistungsdatendetails/spieler/{tm_id}/plus/0?saison=&verein=&liga=&wettbewerb=&pos=&trainer_id="
-    
     try:
-        # 1. Hauptprofil für Name, Nationen, Clubs und Titel
-        res = SCRAPER.get(p_url, timeout=20)
+        res = SCRAPER.get(s_url, timeout=20)
+        if res.status_code != 200: return None
+        
         soup = BeautifulSoup(res.content, 'html.parser')
-        
-        name = soup.find('h1').text.strip() if soup.find('h1') else "Unbekannt"
-        
-        # Nationen (Flaggen-Titel)
-        nations = [img['title'] for img in soup.find_all('img', class_='flaggenabfrage') if img.get('title')]
-        
-        # Clubs (Historie)
-        clubs = set()
-        for cl in soup.find_all('a', href=re.compile(r'/startseite/verein/')):
-            c_name = cl.text.strip()
-            if c_name and len(c_name) > 2: clubs.add(c_name)
+        footer = soup.find('tfoot')
+        if not footer: return None
 
-        # Titel-Check (Erfolge-Box)
-        erfolge_text = soup.get_text().lower()
-        ist_meister = 1 if any(x in erfolge_text for x in ["meister", "champion"]) else 0
-        ist_ts = 1 if any(x in erfolge_text for x in ["torschützenkönig", "top scorer"]) else 0
-        ist_cup = 1 if any(x in erfolge_text for x in ["cupsieger", "cup winner"]) else 0
-
-        # 2. Leistungsdaten für Stats (Einsätze, Tore, Assists)
-        time.sleep(2)
-        res_s = SCRAPER.get(s_url, timeout=20)
-        soup_s = BeautifulSoup(res_s.content, 'html.parser')
-        footer = soup_s.find('tfoot')
-        
-        e, t, a = 0, 0, 0
-        if footer:
-            cells = footer.find_all('td')
-            if len(cells) > 6:
-                def clean(v):
-                    txt = v.text.strip().replace('.', '').replace(',', '').replace('-', '0')
-                    return int(txt) if txt.isdigit() else 0
-                e, t, a = clean(cells[4]), clean(cells[5]), clean(cells[6])
-
-        # Check ob Karriereende
-        retired = 1 if "karriereende" in erfolge_text or "retired" in erfolge_text else 0
-
-        return {
-            'name': name, 'nations': nations, 'clubs': clubs, 
-            'e': e, 't': t, 'a': a, 
-            'ch': ist_meister, 'ts': ist_ts, 'cup': ist_cup,
-            'retired': retired
-        }
-    except Exception as e:
-        print(f"❌ Fehler bei ID {tm_id}: {e}")
+        cells = footer.find_all('td')
+        if len(cells) > 6:
+            def clean_val(v):
+                txt = v.text.strip().replace('.', '').replace(',', '').replace('-', '0')
+                return int(txt) if txt.isdigit() else 0
+            return {'e': clean_val(cells[4]), 't': clean_val(cells[5]), 'a': clean_val(cells[6])}
+    except:
         return None
 
 def run_update():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Spalten sicherstellen
-    try: cursor.execute("ALTER TABLE players ADD COLUMN in_switzerland INTEGER DEFAULT 0")
-    except: pass
-    try: cursor.execute("ALTER TABLE players ADD COLUMN last_updated TEXT")
-    except: pass
-
-    # 1. Reset CH-Status
-    cursor.execute("UPDATE players SET in_switzerland = 0")
-
-    # 2. Discovery: Alle IDs auf den Transferlisten finden
-    current_ids = get_current_league_ids()
-    print(f"✅ Insgesamt {len(current_ids)} IDs auf den Listen gefunden.")
-
-    cursor.execute("SELECT tm_id FROM players")
-    known_ids = {row[0] for row in cursor.fetchall()}
-
-    new_player_ids = list(current_ids - known_ids)
-    existing_player_ids = current_ids & known_ids
-
-    print(f"📊 Analyse: {len(existing_player_ids)} bekannte Spieler, {len(new_player_ids)} Neuzugänge.")
-
-    # 3. Bekannte Spieler markieren
-    for tid in existing_player_ids:
-        cursor.execute("UPDATE players SET in_switzerland = 1 WHERE tm_id = ?", (tid,))
+    # 0. Bestehende Daten bereinigen (Falls noch #99 in der DB steht)
+    cleanup_existing_database(cursor)
     conn.commit()
 
-    # 4. NEUE SPIELER ERFASSEN (Limit auf 40, um Neuzugänge wie Essende aufzuholen)
-    new_added = 0
-    for tid in new_player_ids[:40]:
-        print(f"🆕 Erfasse Neuzugang (ID: {tid})...")
-        d = get_complete_player_data(tid)
-        if d:
-            cursor.execute("""
-                INSERT INTO players (tm_id, name, total_tore, total_assists, total_einsaetze, 
-                                    meistertitel, is_topscorer, is_cupwinner, retired, in_switzerland, last_updated) 
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (tid, d['name'], d['t'], d['a'], d['e'], d['ch'], d['ts'], d['cup'], d['retired'], 1, datetime.date.today().isoformat()))
-            
-            for n in d['nations']:
-                cursor.execute("INSERT OR IGNORE INTO player_nations VALUES (?,?)", (tid, n))
-            for c in d['clubs']:
-                cursor.execute("INSERT OR IGNORE INTO player_clubs VALUES (?,?)", (tid, c))
-            new_added += 1
-            conn.commit()
-            print(f"      ✅ {d['name']} erfolgreich hinzugefügt.")
-        time.sleep(random.uniform(6, 10))
+    # 1. Aktuelle IDs und Namen aus den Schweizer Ligen holen (für neue Spieler)
+    scraped_players = get_current_swiss_players_data()
+    print(f"✅ {len(scraped_players)} Spieler aktuell in der Schweiz gesichtet.")
 
-    # 5. BESTEHENDE CH-SPIELER AKTUALISIEREN (Limit 150)
+    # 2. Status in der DB aktualisieren und neue Spieler anlegen
+    # Wir setzen zuerst alle auf 0, um Abgänge zu markieren
+    cursor.execute("UPDATE players SET in_switzerland = 0")
+    
+    for tid, name in scraped_players.items():
+        # Prüfen, ob Spieler bereits existiert
+        cursor.execute("SELECT tm_id FROM players WHERE tm_id = ?", (tid,))
+        if cursor.fetchone():
+            # Existiert: Update Status und Name (falls Name in DB noch alt ist)
+            cursor.execute("UPDATE players SET in_switzerland = 1, name = ? WHERE tm_id = ?", (name, tid))
+        else:
+            # Neu: Einfügen
+            print(f"🆕 Neu in Datenbank: {name}")
+            cursor.execute("""
+                INSERT INTO players (tm_id, name, in_switzerland, last_updated) 
+                VALUES (?, ?, 1, NULL)
+            """, (tid, name))
+    conn.commit()
+
+    # 3. Nur Spieler scrapen, die aktuell in der Schweiz spielen (in_switzerland = 1)
+    # Und die noch nicht heute aktualisiert wurden
+    today = datetime.date.today().isoformat()
     cursor.execute("""
         SELECT tm_id, name FROM players 
-        WHERE in_switzerland = 1 AND retired = 0 
-        ORDER BY last_updated ASC LIMIT 150
-    """)
-    to_update = cursor.fetchall()
+        WHERE in_switzerland = 1 AND (last_updated != ? OR last_updated IS NULL)
+    """, (today,))
     
-    print(f"🔄 Aktualisiere {len(to_update)} aktive CH-Spieler...")
-    for tid, name in to_update:
-        d = get_complete_player_data(tid)
-        if d:
+    to_scrape = cursor.fetchall()
+    print(f"🔄 Starte Stats-Update für {len(to_scrape)} aktive Spieler...")
+
+    for i, (tid, name) in enumerate(to_scrape):
+        print(f"[{i+1}/{len(to_scrape)}] ⚽ Scrape Stats: {name}")
+        stats = get_player_stats(tid)
+        
+        if stats:
             cursor.execute("""
                 UPDATE players 
-                SET total_tore=?, total_assists=?, total_einsaetze=?, meistertitel=?, is_topscorer=?, is_cupwinner=?, retired=?, last_updated=?
-                WHERE tm_id=?
-            """, (d['t'], d['a'], d['e'], d['ch'], d['ts'], d['cup'], d['retired'], datetime.date.today().isoformat(), tid))
+                SET total_einsaetze = ?, total_tore = ?, total_assists = ?, last_updated = ?
+                WHERE tm_id = ?
+            """, (stats['e'], stats['t'], stats['a'], today, tid))
             conn.commit()
-            print(f"      ✅ {name} aktualisiert.")
-        time.sleep(random.uniform(5, 8))
+        
+        # Moderate Pause gegen Blocking
+        time.sleep(random.uniform(4, 7))
 
     conn.close()
-    print(f"🏁 Update beendet. {new_added} neue Spieler hinzugefügt.")
+    print(f"🎉 Update für {today} abgeschlossen.")
 
 if __name__ == "__main__":
     run_update()
