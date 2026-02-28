@@ -1,0 +1,127 @@
+const express = require('express');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const PORT = process.env.PORT || 10000;
+
+const dbPath = path.resolve(__dirname, 'schweizer_fussball_grid.db');
+const db = new sqlite3.Database(dbPath);
+
+app.use(express.json());
+app.use(express.static(__dirname));
+app.use('/logos', express.static(path.join(__dirname, 'logos')));
+
+// --- PRÄZISES MAPPING (DB Strings) ---
+const CLUB_MAP = {
+    "Basel": "FC Basel 1893", "Thun": "FC Thun", "St. Gallen": "FC St. Gallen 1879",
+    "Lugano": "FC Lugano", "Sion": "FC Sion", "Young Boys": "Young Boys",
+    "Luzern": "FC Luzern", "Grasshopper": "Grasshopper Club Zürich",
+    "Zürich": "FC Zürich", "Winterthur": "FC Winterthur", "Lausanne": "Lausanne-Sport",
+    "Servette": "Servette FC", "Aarau": "FC Aarau", "Vaduz": "FC Vaduz"
+};
+
+const NATION_MAP = {
+    "SUI": "Switzerland", "ALB": "Albania", "GER": "Germany", "FRA": "France",
+    "ITA": "Italy", "SRB": "Serbia", "KOS": "Kosovo", "AUT": "Austria", "ESP": "Spain", "BRA": "Brazil"
+};
+
+const LEAGUE_MAP = {
+    "Germany": "Bundesliga (GER)", "England": "Premier League (ENG)",
+    "France": "Ligue 1 (FRA)", "Spain": "La Liga (ESP)", "Italy": "Serie A (ITA)"
+};
+
+// --- LOGIK: GENERATOR ---
+function generateDailyGridData() {
+    const clubs = Object.keys(CLUB_MAP);
+    const nations = Object.keys(NATION_MAP);
+    const leagues = Object.keys(LEAGUE_MAP);
+    const specials = [
+        { type: 'champion', value: 'CHAMP', label: 'Meister' },
+        { type: 'cupwinner', value: 'CUP', label: 'Cupsieger' },
+        { type: 'goals_50', value: 'G50', label: '> 50 Tore' },
+        { type: 'goals_season_10', value: 'GS10', label: '> 10 Tore/Sais.' }
+    ];
+
+    let selection = [];
+
+    // 1. Entscheiden, ob eine Nation dabei ist (z.B. 60% Chance)
+    if (Math.random() > 0.4) {
+        const randomNation = nations[Math.floor(Math.random() * nations.length)];
+        selection.push({ type: 'nation', value: randomNation, label: randomNation });
+    }
+
+    // 2. Ein bis zwei Spezial-Kategorien oder Ligen hinzufügen
+    const extraPool = [
+        ...leagues.map(l => ({ type: 'league', value: l, label: l })),
+        ...specials
+    ].sort(() => 0.5 - Math.random());
+    selection.push(extraPool[0]);
+    selection.push(extraPool[1]);
+
+    // 3. Den Rest mit Clubs auffüllen, bis wir 6 Kategorien haben
+    const shuffledClubs = clubs.sort(() => 0.5 - Math.random());
+    while (selection.length < 6) {
+        const club = shuffledClubs.pop();
+        selection.push({ type: 'team', value: club, label: club });
+    }
+
+    // 4. Alles mischen und auf Reihen (3) und Spalten (3) verteilen
+    selection = selection.sort(() => 0.5 - Math.random());
+    return {
+        rows: selection.slice(0, 3),
+        cols: selection.slice(3, 6)
+    };
+}
+
+app.get('/api/daily-grid', (req, res) => {
+    const today = new Date().toISOString().split('T')[0];
+    db.get("SELECT grid_data FROM daily_grids WHERE date = ?", [today], (err, row) => {
+        if (row) return res.json(JSON.parse(row.grid_data));
+        const newGrid = { ...generateDailyGridData(), date: today };
+        db.run("INSERT INTO daily_grids (date, grid_data) VALUES (?, ?)", [today, JSON.stringify(newGrid)]);
+        res.json(newGrid);
+    });
+});
+
+// --- VALIDIERUNG (CheckCriteria) ---
+async function checkCriteria(tmId, cat) {
+    return new Promise((resolve) => {
+        let sql = ""; let params = [tmId];
+        switch (cat.type) {
+            case 'team': sql = "SELECT 1 FROM player_clubs WHERE tm_id = ? AND club_name = ? LIMIT 1"; params.push(CLUB_MAP[cat.value]); break;
+            case 'nation': sql = "SELECT 1 FROM player_nations WHERE tm_id = ? AND nation_name = ? LIMIT 1"; params.push(NATION_MAP[cat.value]); break;
+            case 'league': sql = "SELECT 1 FROM player_leagues WHERE tm_id = ? AND league_name = ? LIMIT 1"; params.push(LEAGUE_MAP[cat.value]); break;
+            case 'goals_50': sql = "SELECT 1 FROM players WHERE tm_id = ? AND total_tore >= 50 LIMIT 1"; break;
+            case 'goals_season_10': sql = "SELECT 1 FROM players WHERE tm_id = ? AND max_goals_season >= 10 LIMIT 1"; break;
+            case 'champion': sql = "SELECT 1 FROM players WHERE tm_id = ? AND meistertitel > 0 LIMIT 1"; break;
+            case 'cupwinner': sql = "SELECT 1 FROM players WHERE tm_id = ? AND is_cupwinner = 1 LIMIT 1"; break;
+            default: return resolve(false);
+        }
+        db.get(sql, params, (err, row) => resolve(!!row));
+    });
+}
+
+app.get('/api/search', (req, res) => {
+    const q = req.query.q;
+    db.all("SELECT name FROM players WHERE name LIKE ? ORDER BY total_einsaetze DESC LIMIT 15", [`%${q}%`], (err, rows) => {
+        res.json(rows ? rows.map(r => ({ n: r.name.trim() })) : []);
+    });
+});
+
+app.post('/api/verify', async (req, res) => {
+    const { playerName, rowCat, colCat } = req.body;
+    db.get("SELECT tm_id, total_einsaetze FROM players WHERE LOWER(name) = LOWER(?)", [playerName.trim()], async (err, player) => {
+        if (!player) return res.json({ correct: false });
+        const mRow = await checkCriteria(player.tm_id, rowCat);
+        const mCol = await checkCriteria(player.tm_id, colCat);
+        if (mRow && mCol) {
+            let rarity = Math.max(0.5, (500 / (player.total_einsaetze + 1))).toFixed(1);
+            res.json({ correct: true, rarity });
+        } else res.json({ correct: false });
+    });
+});
+
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.listen(PORT, '0.0.0.0', () => console.log(`Server läuft`));
