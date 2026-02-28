@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super League Grid</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #f0f5f1; --surface: #ffffff; --border: #c2d4c4; --accent: #5da261; --correct: #3a8a3f; --wrong: #c0392b; --text: #1a2e1c; --text-dim: #5a7a5d; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; padding-bottom: 50px; }
+  .header { text-align: center; padding: 25px 20px 10px; }
+  .header h1 { font-family: 'Bebas Neue', sans-serif; font-size: 3rem; letter-spacing: 2px; }
+  .stats-bar { display: flex; justify-content: center; gap: 30px; padding: 15px; font-weight: 700; font-family: 'Bebas Neue'; font-size: 1.2rem; }
+  .grid-wrapper { display: flex; justify-content: center; padding: 10px; }
+  .grid-container { display: grid; grid-template-columns: 100px repeat(3, 1fr); gap: 4px; max-width: 550px; width: 100%; }
+  .header-cell { background: var(--surface); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px; text-align: center; min-height: 95px; font-family: 'Bebas Neue'; }
+  .team-logo { width: 45px; height: 45px; object-fit: contain; margin-bottom: 4px; }
+  .cell { background: var(--surface); border: 1px solid var(--border); min-height: 95px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 6px; text-align: center; }
+  .cell.filled { background: #f0fff1; border-color: var(--correct); }
+  .cell.wrong { background: #fff0f0; border-color: var(--wrong); }
+  .player-name { font-weight: 700; font-size: 0.75rem; color: var(--correct); }
+  .player-rarity { font-size: 0.65rem; color: var(--text-dim); }
+  .search-overlay { display: none; position: fixed; inset: 0; background: rgba(240, 245, 241, 0.95); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; }
+  .search-overlay.active { display: flex; }
+  .search-box { background: white; border: 1px solid var(--border); border-radius: 16px; width: 92%; max-width: 400px; padding: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+  .search-input { width: 100%; padding: 14px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; font-size: 1rem; outline: none; }
+  .search-result { padding: 12px; cursor: pointer; border-bottom: 1px solid #eee; text-align: left; }
+  .cat-tag { font-size: 0.6rem; padding: 2px 6px; border-radius: 4px; margin-bottom: 4px; text-transform: uppercase; color: white; }
+  .tag-nation { background: #2e7bbf; }
+  .tag-stats { background: #e67e22; }
+  .tag-trophy { background: #f1c40f; color: #1a2e1c; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <h1>SUPER LEAGUE GRID</h1>
+  <p>Das tägliche Schweizer Fussball-Quiz</p>
+</header>
+
+<div class="stats-bar">
+  Punkte: <span id="score" style="color:var(--correct)">0</span> | Versuche: <span id="tries">9/9</span>
+</div>
+
+<div class="grid-wrapper">
+  <div class="grid-container" id="grid"></div>
+</div>
+
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box">
+    <h3 id="searchHint" style="margin-bottom:15px; font-family: 'Bebas Neue';"></h3>
+    <input class="search-input" id="searchInput" type="text" placeholder="Spieler suchen..." autocomplete="off">
+    <div id="searchResults" style="max-height:250px; overflow-y:auto"></div>
+    <button onclick="closeSearch()" style="width:100%; padding:10px; margin-top:10px; border-radius:8px; border:1px solid #ddd; cursor:pointer">Abbrechen</button>
+  </div>
+</div>
+
+<script>
+// --- FIXIERTES TEAM DATA (Für Logos) ---
+const TEAM_DATA = {
+  "Basel": "FC Basel 1893", "Thun": "FC Thun", "St. Gallen": "FC St. Gallen 1879",
+  "Lugano": "FC Lugano", "Sion": "FC Sion", "Young Boys": "BSC Young Boys",
+  "Luzern": "FC Luzern", "Grasshopper": "Grasshopper Club Zurich",
+  "Zürich": "FC Zurich", "Winterthur": "FC Winterthur", "Lausanne": "FC Lausanne-Sport",
+  "Servette": "Servette FC", "Aarau": "FC Aarau", "Vaduz": "FC Vaduz",
+  "England": "Premier League", "Germany": "Bundesliga", "Italy": "Serie A", "France": "Ligue 1", "Spain": "La Liga"
+};
+
+const NATION_LABELS = { "SUI": "Schweiz", "GER": "Deutschland", "BRA": "Brasilien", "FRA": "Frankreich", "ITA": "Italien", "ALB": "Albanien", "SRB": "Serbien", "KOS": "Kosovo", "AUT": "Österreich", "ESP": "Spanien" };
+
+let state = { date: "", rows: [], cols: [], score: 0, tries: 9, cells: {}, usedPlayers: [], gameOver: false };
+
+// --- FIXIERTE DARSTELLUNG (Logos & Header) ---
+function headerHTML(cat) {
+  if (cat.type === 'team' || cat.type === 'league') {
+    const fileName = TEAM_DATA[cat.value] || cat.value;
+    return `<img class="team-logo" src="/logos/${encodeURIComponent(fileName)}.png" onerror="this.src='https://placehold.co/40x40?text=⚽'"><span>${cat.label}</span>`;
+  }
+  let tagClass = "tag-stats";
+  let label = cat.label;
+  if (cat.type === 'nation') { tagClass = "tag-nation"; label = NATION_LABELS[cat.value] || cat.label; }
+  if (cat.type === 'champion' || cat.type === 'cupwinner') { tagClass = "tag-trophy"; label = "🏆 " + label; }
+
+  return `<span class="cat-tag ${tagClass}">${cat.type.replace('_', ' ')}</span><span style="font-size:0.9rem; font-weight:bold;">${label}</span>`;
+}
+
+// Restliche Spiellogik (Laden, Speichern, Validieren)
+function saveState() {
+  const temp = { ...state, usedPlayers: Array.from(state.usedPlayers) };
+  localStorage.setItem(`grid_save_${state.date}`, JSON.stringify(temp));
+}
+
+function loadState(d) {
+  const s = localStorage.getItem(`grid_save_${d}`);
+  if (s) {
+    const p = JSON.parse(s);
+    state = p; state.usedPlayers = new Set(p.usedPlayers);
+    return true;
+  }
+  return false;
+}
+
+function renderGrid() {
+  const container = document.getElementById('grid');
+  container.innerHTML = '<div class="header-cell"><img src="/logos/corner.png" class="team-logo" onerror="this.src=\'https://placehold.co/40x40?text=⚽\'"></div>';
+  state.cols.forEach(c => {
+    const d = document.createElement('div'); d.className='header-cell'; d.innerHTML=headerHTML(c); container.appendChild(d);
+  });
+  for (let r = 0; r < 3; r++) {
+    const rh = document.createElement('div'); rh.className='header-cell'; rh.innerHTML=headerHTML(state.rows[r]); container.appendChild(rh);
+    for (let c = 0; c < 3; c++) {
+      const k = `${r}-${c}`, d = document.createElement('div'); d.className='cell';
+      if (state.cells[k]) {
+        d.classList.add('filled');
+        d.innerHTML = `<div><div class="player-name">${state.cells[k].name}</div><div class="player-rarity">${state.cells[k].rarity} Pkt</div></div>`;
+      } else if (state.cells[k] === false) {
+        d.classList.add('wrong'); d.innerHTML = '<span style="color:var(--wrong); font-size:1.8rem;">✕</span>';
+      } else if (!state.gameOver) { d.onclick = () => openSearch(k); }
+      container.appendChild(d);
+    }
+  }
+}
+
+async function initGame() {
+  const res = await fetch('/api/daily-grid');
+  const data = await res.json();
+  if (!loadState(data.date)) {
+    state.date = data.date; state.rows = data.rows; state.cols = data.cols; 
+    state.score = 0; state.tries = 9; state.cells = {}; state.usedPlayers = new Set();
+  }
+  document.getElementById('score').textContent = state.score.toFixed(1);
+  document.getElementById('tries').textContent = `${state.tries}/9`;
+  renderGrid();
+}
+
+function openSearch(k) {
+  state.selectedCell = k;
+  const [r, c] = k.split('-').map(Number);
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('searchHint').textContent = `${state.rows[r].label} ∩ ${state.cols[c].label}`;
+  document.getElementById('searchOverlay').classList.add('active');
+  document.getElementById('searchInput').focus();
+}
+
+function closeSearch() { document.getElementById('searchOverlay').classList.remove('active'); }
+
+document.getElementById('searchInput').oninput = async (e) => {
+  const q = e.target.value.trim();
+  if (q.length < 3) return;
+  const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  const players = await res.json();
+  const results = document.getElementById('searchResults');
+  results.innerHTML = '';
+  players.forEach(p => {
+    const d = document.createElement('div'); d.className='search-result'; d.textContent=p.n;
+    d.onclick = () => makeGuess(p.n); results.appendChild(d);
+  });
+};
+
+async function makeGuess(name) {
+  if (state.usedPlayers.has(name)) return alert("Schon benutzt!");
+  const k = state.selectedCell, [r, c] = k.split('-').map(Number);
+  closeSearch();
+  const res = await fetch('/api/verify', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playerName: name, rowCat: state.rows[r], colCat: state.cols[c] })
+  });
+  const resData = await res.json();
+  if (resData.correct) {
+    state.cells[k] = { name, rarity: resData.rarity };
+    state.score += parseFloat(resData.rarity);
+    state.usedPlayers.add(name);
+  } else { state.cells[k] = false; }
+  state.tries--;
+  if (state.tries <= 0) state.gameOver = true;
+  saveState();
+  document.getElementById('score').textContent = state.score.toFixed(1);
+  document.getElementById('tries').textContent = `${state.tries}/9`;
+  renderGrid();
+}
+
+initGame();
+</script>
+</body>
+</html>
