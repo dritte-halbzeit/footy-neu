@@ -60,9 +60,9 @@
 // --- FIXIERTES TEAM DATA (Für Logos) ---
 const TEAM_DATA = {
   "Basel": "FC Basel 1893", "Thun": "FC Thun", "St. Gallen": "FC St. Gallen 1879",
-  "Lugano": "FC Lugano", "Sion": "FC Sion", "Young Boys": "Young Boys",
-  "Luzern": "FC Luzern", "Grasshopper": "Grasshopper Club Zürich",
-  "Zürich": "FC Zürich", "Winterthur": "FC Winterthur", "Lausanne": "Lausanne-Sport",
+  "Lugano": "FC Lugano", "Sion": "FC Sion", "Young Boys": "BSC Young Boys",
+  "Luzern": "FC Luzern", "Grasshopper": "Grasshopper Club Zurich",
+  "Zürich": "FC Zurich", "Winterthur": "FC Winterthur", "Lausanne": "FC Lausanne-Sport",
   "Servette": "Servette FC", "Aarau": "FC Aarau", "Vaduz": "FC Vaduz",
   "England": "Premier League", "Germany": "Bundesliga", "Italy": "Serie A", "France": "Ligue 1", "Spain": "La Liga"
 };
@@ -75,7 +75,7 @@ let state = { date: "", rows: [], cols: [], score: 0, tries: 9, cells: {}, usedP
 function headerHTML(cat) {
   if (cat.type === 'team' || cat.type === 'league') {
     const fileName = TEAM_DATA[cat.value] || cat.value;
-    return `<img class="team-logo" src="/logos/${fileName}.png" onerror="this.src='https://placehold.co/40x40?text=⚽'"><span>${cat.label}</span>`;
+    return `<img class="team-logo" src="/logos/${encodeURIComponent(fileName)}.png" onerror="this.src='https://placehold.co/40x40?text=⚽'"><span>${cat.label}</span>`;
   }
   let tagClass = "tag-stats";
   let label = cat.label;
