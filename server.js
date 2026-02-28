@@ -92,7 +92,7 @@ async function checkCriteria(tmId, cat) {
     return new Promise((resolve) => {
         let sql = ""; let params = [tmId];
         switch (cat.type) {
-            case 'team': sql = "SELECT 1 FROM player_clubs WHERE tm_id = ? AND club_name = ? LIMIT 1"; params.push(CLUB_MAP[cat.value]); break;
+            case 'team': sql = "SELECT 1 FROM player_clubs WHERE tm_id = ? AND (club_name LIKE ? OR club_name LIKE ?) LIMIT 1"; params.push(`%${CLUB_MAP[cat.value]}%`); params.push(`%${cat.value}%`); break;
             case 'nation': sql = "SELECT 1 FROM player_nations WHERE tm_id = ? AND nation_code = ? LIMIT 1"; params.push(NATION_MAP[cat.value]); break;
             case 'league': sql = "SELECT 1 FROM player_leagues WHERE tm_id = ? AND (league_code LIKE ? OR league_code LIKE ?) LIMIT 1"; params.push(`%${LEAGUE_MAP[cat.value]}%`); params.push(`%${LEAGUE_MAP[cat.value].replace(' ', '')}%`); break;
             case 'goals_50': sql = "SELECT 1 FROM players WHERE tm_id = ? AND total_tore >= 50 LIMIT 1"; break;
