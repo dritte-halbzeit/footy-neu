@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super League Grid</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f0f5f1; --surface: #ffffff; --surface-hover: #e8f0e9; --border: #c2d4c4;
+    --accent: #5da261; --correct: #3a8a3f; --wrong: #c0392b; --text: #1a2e1c;
+    --text-dim: #5a7a5d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: var(--bg); 
+    color: var(--text); 
+    font-family: 'DM Sans', sans-serif; 
+    min-height: 100vh; 
+    padding-bottom: 50px; 
+  }
+  .header { text-align: center; padding: 25px 20px 10px; }
+  .header h1 { font-family: 'Bebas Neue', sans-serif; font-size: clamp(2.5rem, 8vw, 3.5rem); letter-spacing: 2px; color: var(--text); }
+  .header p { font-size: 0.9rem; color: var(--text-dim); margin-top: -5px; }
+
+  .stats-bar { 
+    display: flex; 
+    justify-content: center; 
+    gap: 30px; 
+    padding: 15px; 
+    font-weight: 700; 
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.2rem;
+  }
+  .stat-highlight { color: var(--correct); font-size: 1.4rem; }
+
+  .grid-wrapper { display: flex; justify-content: center; padding: 10px; }
+  .grid-container { 
+    display: grid; 
+    grid-template-columns: 100px repeat(3, 1fr); 
+    gap: 4px; 
+    max-width: 550px; 
+    width: 100%; 
+  }
+
+  .header-cell { 
+    background: var(--surface); 
+    border: 1px solid var(--border); 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    justify-content: center; 
+    padding: 8px 4px; 
+    text-align: center; 
+    min-height: 90px; 
+    font-family: 'Bebas Neue', sans-serif; 
+  }
+  .team-logo { width: 45px; height: 45px; object-fit: contain; margin-bottom: 4px; }
+  
+  .cell { 
+    background: var(--surface); 
+    border: 1px solid var(--border); 
+    min-height: 90px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    cursor: pointer; 
+    transition: 0.2s; 
+    padding: 6px; 
+    text-align: center; 
+    position: relative;
+  }
+  .cell:hover:not(.filled):not(.wrong) { background: var(--surface-hover); }
+  .cell.filled { background: #f0fff1; border-color: var(--correct); cursor: default; }
+  .cell.wrong { background: #fff0f0; border-color: var(--wrong); cursor: default; }
+
+  .player-name { font-weight: 700; font-size: 0.75rem; color: var(--correct); line-height: 1.1; }
+  .player-rarity { font-size: 0.65rem; color: var(--text-dim); margin-top: 3px; }
+
+  /* Suche Overlay */
+  .search-overlay { 
+    display: none; 
+    position: fixed; 
+    inset: 0; 
+    background: rgba(240, 245, 241, 0.95); 
+    backdrop-filter: blur(8px);
+    z-index: 1000; 
+    align-items: center; 
+    justify-content: center; 
+  }
+  .search-overlay.active { display: flex; }
+  .search-box { 
+    background: white; 
+    border: 1px solid var(--border); 
+    border-radius: 16px; 
+    width: 92%; 
+    max-width: 400px; 
+    padding: 20px; 
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1); 
+  }
+  .search-input { 
+    width: 100%; 
+    padding: 14px; 
+    border: 1px solid var(--border); 
+    border-radius: 10px; 
+    margin-bottom: 12px; 
+    font-size: 1rem; 
+    outline: none; 
+    font-family: inherit;
+  }
+  .search-result { 
+    padding: 12px; 
+    cursor: pointer; 
+    border-bottom: 1px solid #eee; 
+    text-align: left; 
+    font-weight: 500;
+  }
+  .search-result:hover { background: var(--bg); color: var(--correct); }
+  
+  .cat-tag { 
+    font-size: 0.6rem; 
+    padding: 2px 6px; 
+    background: #e1ede2; 
+    color: var(--text-dim); 
+    border-radius: 4px; 
+    margin-bottom: 4px; 
+    text-transform: uppercase; 
+    letter-spacing: 0.5px;
+  }
+
+  .btn-close {
+    margin-top: 15px; 
+    width: 100%; 
+    padding: 12px; 
+    background: #f8f8f8; 
+    border: 1px solid #ddd; 
+    border-radius: 10px; 
+    cursor: pointer;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="header">
+    <h1>SUPER LEAGUE GRID</h1>
+    <p>Das tägliche Schweizer Fussball-Quiz der «Dritten Halbzeit»</p>
+  </header>
+
+  <div class="stats-bar">
+    Punkte: <span id="score" class="stat-highlight">0</span>
+    &nbsp;&nbsp;|&nbsp;&nbsp;
+    Versuche: <span id="tries">9/9</span>
+  </div>
+
+  <div class="grid-wrapper">
+    <div class="grid-container" id="grid">
+      <!-- Grid wird via JS generiert -->
+    </div>
+  </div>
+</div>
+
+<!-- Such-Overlay -->
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-box">
+    <div style="font-size: 0.8rem; color: var(--text-dim); margin-bottom: 5px;">Gesuchte Kombination:</div>
+    <h3 id="searchHint" style="margin-bottom:15px; font-family: 'Bebas Neue'; letter-spacing: 1px;"></h3>
+    <input class="search-input" id="searchInput" type="text" placeholder="Spieler suchen (min. 3 Zeichen)..." autocomplete="off">
+    <div id="searchResults" style="max-height:250px; overflow-y:auto"></div>
+    <button class="btn-close" onclick="closeSearch()">Abbrechen</button>
+  </div>
+</div>
+
+<script>
+// Mapping der Logos
+const TEAM_DATA = {
+  "Basel": { file: "FC Basel 1893", label: "Basel" },
+  "Young Boys": { file: "BSC Young Boys", label: "YB" },
+  "Zürich": { file: "FC Zurich", label: "Zürich" },
+  "St. Gallen": { file: "FC St. Gallen 1879", label: "St. Gallen" },
+  "Luzern": { file: "FC Luzern", label: "Luzern" },
+  "Servette": { file: "Servette FC", label: "Servette" },
+  "Sion": { file: "FC Sion", label: "Sion" },
+  "Grasshopper": { file: "Grasshopper Club Zurich", label: "GC" },
+  "Lugano": { file: "FC Lugano", label: "Lugano" },
+  "Winterthur": { file: "FC Winterthur", label: "Winterthur" },
+  "Lausanne": { file: "FC Lausanne-Sport", label: "Lausanne" },
+  "Aarau": { file: "FC Aarau", label: "Aarau" },
+  "Thun": { file: "FC Thun", label: "Thun" },
+  "Vaduz": { file: "FC Vaduz", label: "Vaduz" },
+  "England": { file: "Premier League", label: "England" },
+  "Germany": { file: "Bundesliga", label: "Deutschland" },
+  "Italy": { file: "Serie A", label: "Italien" },
+  "France": { file: "Ligue 1", label: "Frankreich" },
+  "Spain": { file: "La Liga", label: "Spanien" }
+};
+
+// Globaler Spielzustand
+let state = { 
+  date: "", 
+  rows: [], 
+  cols: [], 
+  score: 0, 
+  tries: 9, 
+  cells: {}, 
+  usedPlayers: [], 
+  selectedCell: null,
+  gameOver: false 
+};
+
+// --- LOGIK: SPEICHERN & LADEN (Anti-Cheat) ---
+
+function saveState() {
+  const tempState = { ...state, usedPlayers: Array.from(state.usedPlayers) };
+  localStorage.setItem(`grid_save_${state.date}`, JSON.stringify(tempState));
+}
+
+function loadState(todayDate) {
+  const saved = localStorage.getItem(`grid_save_${todayDate}`);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    state = parsed;
+    state.usedPlayers = new Set(parsed.usedPlayers);
+    return true;
+  }
+  return false;
+}
+
+// --- LOGIK: GRID DARSTELLUNG ---
+
+function headerHTML(cat) {
+  if (cat.type === 'team' || cat.type === 'league') {
+    const data = TEAM_DATA[cat.value];
+    const fileName = data ? data.file : cat.value;
+    return `<img class="team-logo" src="/logos/${fileName}.png" onerror="this.src='https://placehold.co/40x40?text=⚽'"><span>${cat.label}</span>`;
+  }
+  const labels = { 'nation': 'Land', 'goals_50': 'Tore', 'assists_10': 'Assists', 'assists_50': 'Assists', 'champion': 'Titel' };
+  const tagLabel = labels[cat.type] || 'Info';
+  return `<span class="cat-tag">${tagLabel}</span><span style="font-size:0.9rem; font-weight:bold;">${cat.label}</span>`;
+}
+
+function renderGrid() {
+  const container = document.getElementById('grid');
+  container.innerHTML = '';
+
+  // 1. Ecke oben links (Corner Logo)
+  const corner = document.createElement('div');
+  corner.className = 'header-cell';
+  corner.innerHTML = `<img src="/logos/corner.png" class="team-logo" onerror="this.src='https://placehold.co/40x40?text=⚽'">`;
+  container.appendChild(corner);
+
+  // 2. Spalten-Header
+  state.cols.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'header-cell';
+    div.innerHTML = headerHTML(c);
+    container.appendChild(div);
+  });
+
+  // 3. Zeilen + Zellen
+  for (let r = 0; r < 3; r++) {
+    const rowH = document.createElement('div');
+    rowH.className = 'header-cell';
+    rowH.innerHTML = headerHTML(state.rows[r]);
+    container.appendChild(rowH);
+
+    for (let c = 0; c < 3; c++) {
+      const key = `${r}-${c}`;
+      const div = document.createElement('div');
+      div.className = 'cell';
+      
+      if (state.cells[key]) {
+        div.classList.add('filled');
+        div.innerHTML = `<div><div class="player-name">${state.cells[key].name}</div><div class="player-rarity">${state.cells[key].rarity} Pkt</div></div>`;
+      } else if (state.cells[key] === false) {
+        div.classList.add('wrong');
+        div.innerHTML = '<span style="color:var(--wrong); font-size:1.8rem; font-weight:bold;">✕</span>';
+      } else {
+        if (!state.gameOver) div.onclick = () => openSearch(key);
+      }
+      container.appendChild(div);
+    }
+  }
+}
+
+function updateUI() {
+  document.getElementById('score').textContent = parseFloat(state.score).toFixed(1);
+  document.getElementById('tries').textContent = `${state.tries}/9`;
+}
+
+// --- LOGIK: SUCHE & VALIDIERUNG ---
+
+async function initGame() {
+  try {
+    const res = await fetch('/api/daily-grid');
+    const data = await res.json();
+    const today = data.date;
+
+    // Versuche gespeicherten Stand zu laden, sonst neu initialisieren
+    if (!loadState(today)) {
+      state.date = today;
+      state.rows = data.rows;
+      state.cols = data.cols;
+      state.score = 0;
+      state.tries = 9;
+      state.cells = {};
+      state.usedPlayers = new Set();
+      state.gameOver = false;
+    }
+    
+    updateUI();
+    renderGrid();
+  } catch (e) {
+    console.error("Fehler beim Laden des Spiels:", e);
+  }
+}
+
+function openSearch(key) {
+  state.selectedCell = key;
+  const [r, c] = key.split('-').map(Number);
+  
+  // Suchmaske zurücksetzen
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('searchHint').textContent = `${state.rows[r].label} ∩ ${state.cols[c].label}`;
+  
+  document.getElementById('searchOverlay').classList.add('active');
+  setTimeout(() => document.getElementById('searchInput').focus(), 100);
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').classList.remove('active');
+}
+
+document.getElementById('searchInput').oninput = async (e) => {
+  const q = e.target.value.trim();
+  const resultsDiv = document.getElementById('searchResults');
+  
+  if (q.length < 3) {
+    resultsDiv.innerHTML = '';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const players = await res.json();
+    resultsDiv.innerHTML = '';
+    
+    players.forEach(p => {
+      const d = document.createElement('div');
+      d.className = 'search-result';
+      d.textContent = p.n;
+      d.onclick = () => makeGuess(p.n);
+      resultsDiv.appendChild(d);
+    });
+  } catch (e) {
+    console.error("Suche fehlgeschlagen", e);
+  }
+};
+
+async function makeGuess(playerName) {
+  if (state.gameOver || state.tries <= 0) return;
+  if (state.usedPlayers.has(playerName)) {
+    alert("Diesen Spieler hast du heute bereits verwendet!");
+    return;
+  }
+
+  const key = state.selectedCell;
+  const [r, c] = key.split('-').map(Number);
+  closeSearch();
+
+  try {
+    const res = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        playerName: playerName, 
+        rowCat: state.rows[r], 
+        colCat: state.cols[c] 
+      })
+    });
+    const result = await res.json();
+
+    if (result.correct) {
+      state.cells[key] = { name: playerName, rarity: result.rarity };
+      state.score = parseFloat(state.score) + parseFloat(result.rarity);
+      state.usedPlayers.add(playerName);
+    } else {
+      state.cells[key] = false;
+    }
+
+    state.tries--;
+    if (state.tries <= 0) state.gameOver = true;
+
+    saveState();
+    updateUI();
+    renderGrid();
+
+    if (state.gameOver) {
+      setTimeout(() => alert(`Spiel beendet! Deine Gesamtpunktzahl: ${state.score.toFixed(1)}`), 500);
+    }
+  } catch (e) {
+    alert("Verbindung zum Server verloren. Bitte versuche es erneut.");
+  }
+}
+
+// Spiel starten
+initGame();
+</script>
+
+</body>
+</html>
