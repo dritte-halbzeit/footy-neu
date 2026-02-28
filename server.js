@@ -28,8 +28,8 @@ const NATION_MAP = {
 };
 
 const LEAGUE_MAP = {
-    "Germany": "Bundesliga (GER)", "England": "Premier League (ENG)",
-    "France": "Ligue 1 (FRA)", "Spain": "La Liga (ESP)", "Italy": "Serie A (ITA)"
+    "Germany": "Bundesliga", "England": "Premier League",
+    "France": "Ligue 1", "Spain": "La Liga", "Italy": "Serie A"
 };
 
 // --- OPTIMIERTER GENERATOR (Logik-Update) ---
@@ -55,10 +55,10 @@ function generateDailyGridData() {
 
     // 2. Pools mischen
     const shuffledClubs = clubs.sort(() => 0.5 - Math.random());
-    const shuffledExtras = [...leagues.map(l => ({type:'league', value:l, label:l})), ...specials].sort(() => 0.5 - Math.random());
+    const shuffledExtras = [...leagues.map(l => ({ type: 'league', value: l, label: l })), ...specials].sort(() => 0.5 - Math.random());
 
     // 3. Reihen füllen (Immer Clubs für hohe Lösbarkeit)
-    rowSelection = shuffledClubs.slice(0, 3).map(c => ({type:'team', value:c, label:c}));
+    rowSelection = shuffledClubs.slice(0, 3).map(c => ({ type: 'team', value: c, label: c }));
 
     // 4. Spalten füllen (Mix aus Nation, Liga/Special und Club)
     // Spalte 1: Die Nation (falls gewählt) oder ein Club
@@ -93,8 +93,8 @@ async function checkCriteria(tmId, cat) {
         let sql = ""; let params = [tmId];
         switch (cat.type) {
             case 'team': sql = "SELECT 1 FROM player_clubs WHERE tm_id = ? AND club_name = ? LIMIT 1"; params.push(CLUB_MAP[cat.value]); break;
-            case 'nation': sql = "SELECT 1 FROM player_nations WHERE tm_id = ? AND nation_name = ? LIMIT 1"; params.push(NATION_MAP[cat.value]); break;
-            case 'league': sql = "SELECT 1 FROM player_leagues WHERE tm_id = ? AND league_name = ? LIMIT 1"; params.push(LEAGUE_MAP[cat.value]); break;
+            case 'nation': sql = "SELECT 1 FROM player_nations WHERE tm_id = ? AND nation_code = ? LIMIT 1"; params.push(NATION_MAP[cat.value]); break;
+            case 'league': sql = "SELECT 1 FROM player_leagues WHERE tm_id = ? AND (league_code LIKE ? OR league_code LIKE ?) LIMIT 1"; params.push(`%${LEAGUE_MAP[cat.value]}%`); params.push(`%${LEAGUE_MAP[cat.value].replace(' ', '')}%`); break;
             case 'goals_50': sql = "SELECT 1 FROM players WHERE tm_id = ? AND total_tore >= 50 LIMIT 1"; break;
             case 'goals_season_10': sql = "SELECT 1 FROM players WHERE tm_id = ? AND max_goals_season >= 10 LIMIT 1"; break;
             case 'champion': sql = "SELECT 1 FROM players WHERE tm_id = ? AND meistertitel > 0 LIMIT 1"; break;
