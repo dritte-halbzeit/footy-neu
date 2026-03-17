@@ -1,32 +1,191 @@
-name: Weekly Player Update
+name: Weekly Swiss API Update
 
 on:
   schedule:
-    - cron: '0 2 * * 0' # Jeden Sonntag um 02:00 Uhr nachts
-  workflow_dispatch: # Erlaubt manuelles Starten per Klick
+    # Sunday 01:00 UTC (approx 02:00 CET / 03:00 CEST)
+    - cron: "0 1 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-swiss-api-update
+  cancel-in-progress: true
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install Dependencies
-        run: pip install cloudscraper beautifulsoup4 pandas openpyxl
+      - name: Install app dependencies
+        working-directory: Google
+        run: |
+          pip install --upgrade pip
+          pip install requests cloudscraper beautifulsoup4 pandas openpyxl
 
-      - name: Run Scraper
-        run: python weekly_update.py
+      - name: Install Transfermarkt API dependencies (Poetry)
+        working-directory: Google/transfermarkt-api
+        run: |
+          pip install poetry
+          poetry install --no-interaction --no-root
 
-      - name: Commit Changes
+      - name: Start local Transfermarkt API
+        working-directory: Google/transfermarkt-api
+        run: |
+          nohup poetry run uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/tm_api.log 2>&1 &
+          for i in {1..40}; do
+            if curl -sSf http://127.0.0.1:8000/docs >/dev/null; then
+              echo "Transfermarkt API is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Transfermarkt API failed to start"
+          cat /tmp/tm_api.log || true
+          exit 1
+
+      - name: Run weekly Swiss API refresh
+        working-directory: Google
+        env:
+          API_BASE: http://127.0.0.1:8000
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+          import datetime
+          import random
+          import time
+
+          from weekly_update import DB_NAME, get_current_swiss_ids
+          from api_stats import get_player_stats
+
+          conn = sqlite3.connect(DB_NAME)
+          cur = conn.cursor()
+
+          # Ensure required columns exist
+          cur.execute("PRAGMA table_info(players)")
+          cols = {r[1] for r in cur.fetchall()}
+          if "in_switzerland" not in cols:
+              cur.execute("ALTER TABLE players ADD COLUMN in_switzerland INTEGER DEFAULT 0")
+          if "last_updated" not in cols:
+              cur.execute("ALTER TABLE players ADD COLUMN last_updated TEXT")
+
+          # Ensure required tables exist
+          for sql in [
+              "CREATE TABLE IF NOT EXISTS player_club_goals (tm_id INTEGER, club_name TEXT, goals INTEGER, PRIMARY KEY(tm_id, club_name))",
+              "CREATE TABLE IF NOT EXISTS player_club_assists (tm_id INTEGER, club_name TEXT, assists INTEGER, PRIMARY KEY(tm_id, club_name))",
+              "CREATE TABLE IF NOT EXISTS player_club_appearances (tm_id INTEGER, club_name TEXT, appearances INTEGER, PRIMARY KEY(tm_id, club_name))",
+              "CREATE TABLE IF NOT EXISTS player_club_yellow_cards (tm_id INTEGER, club_name TEXT, yellow_cards INTEGER, PRIMARY KEY(tm_id, club_name))",
+              "CREATE TABLE IF NOT EXISTS player_club_red_cards (tm_id INTEGER, club_name TEXT, red_cards INTEGER, PRIMARY KEY(tm_id, club_name))",
+              "CREATE TABLE IF NOT EXISTS player_club_last_season (tm_id INTEGER, club_name TEXT, last_season_year INTEGER, PRIMARY KEY(tm_id, club_name))",
+              "CREATE TABLE IF NOT EXISTS player_season_goals (tm_id INTEGER, season_name TEXT, goals INTEGER, PRIMARY KEY(tm_id, season_name))",
+              "CREATE TABLE IF NOT EXISTS player_season_assists (tm_id INTEGER, season_name TEXT, assists INTEGER, PRIMARY KEY(tm_id, season_name))",
+              "CREATE TABLE IF NOT EXISTS player_leagues (tm_id INTEGER, league_code TEXT)",
+          ]:
+              cur.execute(sql)
+
+          # 1) Get currently listed Swiss-league players
+          swiss_ids = get_current_swiss_ids()
+          print(f"Swiss-listed players found: {len(swiss_ids)}")
+
+          # 2) Update in_switzerland flags
+          cur.execute("UPDATE players SET in_switzerland = 0")
+          if swiss_ids:
+              cur.executemany("UPDATE players SET in_switzerland = 1 WHERE tm_id = ?", [(i,) for i in swiss_ids])
+          conn.commit()
+
+          # 3) Refresh only Swiss-listed players
+          today = datetime.date.today().isoformat()
+          cur.execute("SELECT tm_id, name FROM players WHERE in_switzerland = 1 ORDER BY tm_id")
+          to_update = cur.fetchall()
+          print(f"Players to update via API: {len(to_update)}")
+
+          ok = 0
+          fail = 0
+
+          for idx, (tid, name) in enumerate(to_update, 1):
+              print(f"[{idx}/{len(to_update)}] {name} ({tid})")
+              stats = get_player_stats(tid)
+              if not stats:
+                  fail += 1
+                  time.sleep(random.uniform(0.8, 1.8))
+                  continue
+
+              # Update core totals + stamp
+              cur.execute(
+                  "UPDATE players SET total_einsaetze = ?, total_tore = ?, total_assists = ?, last_updated = ? WHERE tm_id = ?",
+                  (stats.get("e", 0), stats.get("t", 0), stats.get("a", 0), today, tid)
+              )
+
+              # Replace league and last-season snapshots
+              cur.execute("DELETE FROM player_leagues WHERE tm_id = ?", (tid,))
+              for league_name in stats.get("leagues", []) or []:
+                  if league_name:
+                      cur.execute("INSERT INTO player_leagues (tm_id, league_code) VALUES (?, ?)", (tid, league_name))
+
+              cur.execute("DELETE FROM player_club_last_season WHERE tm_id = ?", (tid,))
+              for club_name, last_year in (stats.get("club_last_season_year", {}) or {}).items():
+                  if last_year:
+                      cur.execute(
+                          "INSERT INTO player_club_last_season (tm_id, club_name, last_season_year) VALUES (?, ?, ?) "
+                          "ON CONFLICT(tm_id, club_name) DO UPDATE SET last_season_year = excluded.last_season_year",
+                          (tid, club_name, int(last_year))
+                      )
+
+              # Upsert helper
+              def upsert(table, col, data):
+                  for k, v in (data or {}).items():
+                      if v and int(v) > 0:
+                          cur.execute(
+                              f"INSERT INTO {table} (tm_id, club_name, {col}) VALUES (?, ?, ?) "
+                              f"ON CONFLICT(tm_id, club_name) DO UPDATE SET {col} = excluded.{col}",
+                              (tid, k, int(v))
+                          )
+
+              upsert("player_club_goals", "goals", stats.get("club_goals"))
+              upsert("player_club_assists", "assists", stats.get("club_assists"))
+              upsert("player_club_appearances", "appearances", stats.get("club_appearances"))
+              upsert("player_club_yellow_cards", "yellow_cards", stats.get("club_yellow_cards"))
+              upsert("player_club_red_cards", "red_cards", stats.get("club_red_cards"))
+
+              for season_name, goals in (stats.get("season_goals", {}) or {}).items():
+                  if goals and int(goals) > 0:
+                      cur.execute(
+                          "INSERT INTO player_season_goals (tm_id, season_name, goals) VALUES (?, ?, ?) "
+                          "ON CONFLICT(tm_id, season_name) DO UPDATE SET goals = excluded.goals",
+                          (tid, season_name, int(goals))
+                      )
+
+              for season_name, assists in (stats.get("season_assists", {}) or {}).items():
+                  if assists and int(assists) > 0:
+                      cur.execute(
+                          "INSERT INTO player_season_assists (tm_id, season_name, assists) VALUES (?, ?, ?) "
+                          "ON CONFLICT(tm_id, season_name) DO UPDATE SET assists = excluded.assists",
+                          (tid, season_name, int(assists))
+                      )
+
+              conn.commit()
+              ok += 1
+              time.sleep(random.uniform(0.8, 1.8))
+
+          conn.close()
+          print(f"Done. Success: {ok}, Failed: {fail}")
+          PY
+
+      - name: Commit updated DB
+        working-directory: Google
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add schweizer_fussball_grid.db
-          git commit -m "Automatisches Daten-Update $(date)" || echo "Keine Änderungen"
+          git commit -m "Weekly Swiss API update $(date -u +'%Y-%m-%d %H:%M UTC')" || echo "No DB changes"
           git push
