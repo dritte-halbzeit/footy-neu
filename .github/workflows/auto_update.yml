@@ -1,16 +1,12 @@
-name: Weekly Swiss API Update
+name: Weekly Player Update
 
 on:
   schedule:
-    - cron: "0 1 * * 0"
+    - cron: "0 2 * * 0"
   workflow_dispatch:
 
 permissions:
   contents: write
-
-concurrency:
-  group: weekly-swiss-api-update
-  cancel-in-progress: true
 
 jobs:
   update:
@@ -29,17 +25,15 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install requests cloudscraper beautifulsoup4 pandas openpyxl
+          pip install cloudscraper beautifulsoup4 pandas openpyxl requests
 
-      - name: Run weekly Swiss API refresh
-        env:
-          API_BASE: ${{ secrets.TRANSFERMARKT_API_BASE }}
-        run: python weekly_update_api.py
+      - name: Run weekly update
+        run: python weekly_update.py
 
       - name: Commit updated DB
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add schweizer_fussball_grid.db
-          git commit -m "Weekly Swiss API update $(date -u +'%Y-%m-%d %H:%M UTC')" || echo "No DB changes"
+          git commit -m "Weekly data update $(date -u +'%Y-%m-%d %H:%M UTC')" || echo "No DB changes"
           git push
