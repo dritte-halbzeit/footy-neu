@@ -27,20 +27,27 @@ jobs:
         with:
           python-version: "3.10"
 
+      # Optional: keep this for one run to verify paths in CI
+      - name: Debug paths
+        run: |
+          pwd
+          ls -la
+          ls -la transfermarkt-api || true
+          ls -la Google || true
+
       - name: Install app dependencies
-        working-directory: Google
         run: |
           pip install --upgrade pip
           pip install requests cloudscraper beautifulsoup4 pandas openpyxl
 
       - name: Install Transfermarkt API dependencies (Poetry)
-        working-directory: Google/transfermarkt-api
+        working-directory: transfermarkt-api
         run: |
           pip install poetry
           poetry install --no-interaction --no-root
 
       - name: Start local Transfermarkt API
-        working-directory: Google/transfermarkt-api
+        working-directory: transfermarkt-api
         run: |
           nohup poetry run uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/tm_api.log 2>&1 &
           for i in {1..40}; do
@@ -55,7 +62,6 @@ jobs:
           exit 1
 
       - name: Run weekly Swiss API refresh
-        working-directory: Google
         env:
           API_BASE: http://127.0.0.1:8000
         run: |
@@ -182,7 +188,6 @@ jobs:
           PY
 
       - name: Commit updated DB
-        working-directory: Google
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
