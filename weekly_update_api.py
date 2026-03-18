@@ -43,16 +43,29 @@ def upsert_club_stat(cur, tid, table, col, data):
                 (tid, club_name, int(value))
             )
 
+
 def check_api_health():
     try:
         resp = requests.get(f"{API_BASE}/docs", timeout=15)
         if resp.status_code != 200:
-            print(f"❌ API health check failed: {API_BASE}/docs -> {resp.status_code}")
+            print(f"❌ API health check failed: {API_BASE}/docs -> HTTP {resp.status_code}")
             return False
+        print(f"✅ API health check ok: {API_BASE}/docs")
         return True
     except Exception as e:
         print(f"❌ API health check exception: {e}")
         return False
+
+
+def debug_stats_endpoint(tm_id):
+    """Direct diagnostics for /players/{id}/stats when get_player_stats returns None."""
+    url = f"{API_BASE}/players/{tm_id}/stats"
+    try:
+        resp = requests.get(url, timeout=20)
+        body = (resp.text or "").replace("\n", " ")[:240]
+        return resp.status_code, body
+    except Exception as e:
+        return None, f"request_exception: {e}"
 
 
 def run_weekly_api_update():
@@ -66,44 +79,41 @@ def run_weekly_api_update():
         conn.close()
         raise RuntimeError(f"API_BASE is not reachable: {API_BASE}")
 
-    cur.execute("SELECT tm_id FROM players WHERE in_switzerland = 1")
-    previous_swiss_ids = {row[0] for row in cur.fetchall()}
-
+    # 1) Detect currently listed Swiss-league players
     swiss_ids = get_current_swiss_ids()
     print(f"Swiss-listed players found: {len(swiss_ids)}")
-    if len(swiss_ids) < MIN_EXPECTED_SWISS_IDS:
-        if previous_swiss_ids:
-            print(
-                f"⚠️ Suspiciously low Swiss count ({len(swiss_ids)}). "
-                f"Using fallback from previous DB state ({len(previous_swiss_ids)})."
-            )
-            swiss_ids = previous_swiss_ids
-        else:
-            conn.close()
-            raise RuntimeError(
-                f"Swiss-listed player count too low ({len(swiss_ids)}). "
-                "Aborting to avoid bad update."
-            )
 
+    # Strict guard: do NOT continue with suspiciously low scrape counts.
+    if len(swiss_ids) < MIN_EXPECTED_SWISS_IDS:
+        conn.close()
+        raise RuntimeError(
+            f"Swiss-listed player count too low ({len(swiss_ids)}). "
+            "Aborting to avoid bad update. Check scraping access/rate limits."
+        )
+
+    # 2) Update in_switzerland flags
     cur.execute("UPDATE players SET in_switzerland = 0")
-    if swiss_ids:
-        cur.executemany("UPDATE players SET in_switzerland = 1 WHERE tm_id = ?", [(i,) for i in swiss_ids])
+    cur.executemany("UPDATE players SET in_switzerland = 1 WHERE tm_id = ?", [(i,) for i in swiss_ids])
     conn.commit()
 
+    # 3) Refresh only Swiss-listed players
     today = datetime.date.today().isoformat()
     cur.execute("SELECT tm_id, name FROM players WHERE in_switzerland = 1 ORDER BY tm_id")
     to_update = cur.fetchall()
     print(f"Players to update via API: {len(to_update)}")
 
-    ok = fail = 0
+    ok = 0
+    fail = 0
     failed_players = []
+
     for idx, (tid, name) in enumerate(to_update, 1):
         print(f"[{idx}/{len(to_update)}] {name} ({tid})")
         stats = get_player_stats(tid)
         if not stats:
             fail += 1
-            failed_players.append((tid, name))
-            print(f"   ⚠️ API stats missing/failed for {name} ({tid})")
+            status, detail = debug_stats_endpoint(tid)
+            print(f"   ⚠️ API stats missing for {name} ({tid}) | endpoint_status={status} | detail={detail}")
+            failed_players.append((tid, name, status))
             time.sleep(random.uniform(0.8, 1.8))
             continue
 
@@ -112,11 +122,13 @@ def run_weekly_api_update():
             (stats.get("e", 0), stats.get("t", 0), stats.get("a", 0), today, tid)
         )
 
+        # Replace league snapshot
         cur.execute("DELETE FROM player_leagues WHERE tm_id = ?", (tid,))
         for league_name in stats.get("leagues", []) or []:
             if league_name:
                 cur.execute("INSERT INTO player_leagues (tm_id, league_code) VALUES (?, ?)", (tid, league_name))
 
+        # Replace last-season-per-club snapshot
         cur.execute("DELETE FROM player_club_last_season WHERE tm_id = ?", (tid,))
         for club_name, last_year in (stats.get("club_last_season_year", {}) or {}).items():
             if last_year:
@@ -126,12 +138,14 @@ def run_weekly_api_update():
                     (tid, club_name, int(last_year))
                 )
 
+        # Club stat upserts
         upsert_club_stat(cur, tid, "player_club_goals", "goals", stats.get("club_goals"))
         upsert_club_stat(cur, tid, "player_club_assists", "assists", stats.get("club_assists"))
         upsert_club_stat(cur, tid, "player_club_appearances", "appearances", stats.get("club_appearances"))
         upsert_club_stat(cur, tid, "player_club_yellow_cards", "yellow_cards", stats.get("club_yellow_cards"))
         upsert_club_stat(cur, tid, "player_club_red_cards", "red_cards", stats.get("club_red_cards"))
 
+        # Season stat upserts
         for season_name, goals in (stats.get("season_goals", {}) or {}).items():
             if goals and int(goals) > 0:
                 cur.execute(
@@ -154,9 +168,11 @@ def run_weekly_api_update():
 
     conn.close()
     print(f"Done. Success: {ok}, Failed: {fail}")
+
     if failed_players:
-        sample = ", ".join([f"{n} ({tid})" for tid, n in failed_players[:10]])
+        sample = ", ".join([f"{n} ({tid}) [status={status}]" for tid, n, status in failed_players[:10]])
         print(f"Failed sample: {sample}")
+
     if ok == 0:
         raise RuntimeError("No successful player updates. Failing run intentionally.")
 
