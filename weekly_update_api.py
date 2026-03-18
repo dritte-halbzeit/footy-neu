@@ -4,7 +4,7 @@ import random
 import time
 import requests
 
-from weekly_update import DB_NAME, get_current_swiss_ids
+from weekly_update import DB_NAME
 from api_stats import get_player_stats, API_BASE
 
 MIN_EXPECTED_SWISS_IDS = 120
@@ -68,6 +68,51 @@ def debug_stats_endpoint(tm_id):
         return None, f"request_exception: {e}"
 
 
+def get_current_swiss_ids_via_api():
+    """
+    Fetch currently listed players for Swiss Super League (C1)
+    and Challenge League (C2) via API (no HTML scraping).
+    """
+    ids = set()
+    competitions = ["C1", "C2"]
+
+    for comp_id in competitions:
+        clubs_url = f"{API_BASE}/competitions/{comp_id}/clubs"
+        try:
+            r = requests.get(clubs_url, timeout=25)
+            if r.status_code != 200:
+                print(f"❌ Clubs API failed for {comp_id}: HTTP {r.status_code}")
+                continue
+            clubs = (r.json() or {}).get("clubs") or []
+            print(f"ℹ️ Competition {comp_id}: {len(clubs)} clubs")
+        except Exception as e:
+            print(f"❌ Clubs API exception for {comp_id}: {e}")
+            continue
+
+        for club in clubs:
+            club_id = str(club.get("id") or "").strip()
+            if not club_id:
+                continue
+            players_url = f"{API_BASE}/clubs/{club_id}/players"
+            try:
+                rp = requests.get(players_url, timeout=25)
+                if rp.status_code != 200:
+                    print(f"❌ Players API failed for club {club_id}: HTTP {rp.status_code}")
+                    continue
+                players = (rp.json() or {}).get("players") or []
+                for p in players:
+                    pid = p.get("id")
+                    if pid is not None and str(pid).isdigit():
+                        ids.add(int(pid))
+            except Exception as e:
+                print(f"❌ Players API exception for club {club_id}: {e}")
+                continue
+
+            time.sleep(random.uniform(0.2, 0.6))
+
+    return ids
+
+
 def run_weekly_api_update():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
@@ -79,16 +124,15 @@ def run_weekly_api_update():
         conn.close()
         raise RuntimeError(f"API_BASE is not reachable: {API_BASE}")
 
-    # 1) Detect currently listed Swiss-league players
-    swiss_ids = get_current_swiss_ids()
-    print(f"Swiss-listed players found: {len(swiss_ids)}")
+    # 1) Detect currently listed Swiss-league players via API
+    swiss_ids = get_current_swiss_ids_via_api()
+    print(f"Swiss-listed players found (API): {len(swiss_ids)}")
 
-    # Strict guard: do NOT continue with suspiciously low scrape counts.
     if len(swiss_ids) < MIN_EXPECTED_SWISS_IDS:
         conn.close()
         raise RuntimeError(
             f"Swiss-listed player count too low ({len(swiss_ids)}). "
-            "Aborting to avoid bad update. Check scraping access/rate limits."
+            "Aborting to avoid bad update. Check API/rate limits."
         )
 
     # 2) Update in_switzerland flags
@@ -117,6 +161,7 @@ def run_weekly_api_update():
             time.sleep(random.uniform(0.8, 1.8))
             continue
 
+        # Update core totals + stamp
         cur.execute(
             "UPDATE players SET total_einsaetze=?, total_tore=?, total_assists=?, last_updated=? WHERE tm_id=?",
             (stats.get("e", 0), stats.get("t", 0), stats.get("a", 0), today, tid)
@@ -138,14 +183,14 @@ def run_weekly_api_update():
                     (tid, club_name, int(last_year))
                 )
 
-        # Club stat upserts
+        # Club stats
         upsert_club_stat(cur, tid, "player_club_goals", "goals", stats.get("club_goals"))
         upsert_club_stat(cur, tid, "player_club_assists", "assists", stats.get("club_assists"))
         upsert_club_stat(cur, tid, "player_club_appearances", "appearances", stats.get("club_appearances"))
         upsert_club_stat(cur, tid, "player_club_yellow_cards", "yellow_cards", stats.get("club_yellow_cards"))
         upsert_club_stat(cur, tid, "player_club_red_cards", "red_cards", stats.get("club_red_cards"))
 
-        # Season stat upserts
+        # Season stats
         for season_name, goals in (stats.get("season_goals", {}) or {}).items():
             if goals and int(goals) > 0:
                 cur.execute(
